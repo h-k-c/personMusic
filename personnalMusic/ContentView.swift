@@ -546,6 +546,7 @@ struct PlaylistOverlayView: View {
     @ObservedObject var playerViewModel: PlayerViewModel
     @ObservedObject private var themeManager = ThemeManager.shared
     @State private var scrollProxy: ScrollViewProxy? = nil
+    @State private var showClearConfirmation = false
     
     var body: some View {
         ZStack {
@@ -559,7 +560,32 @@ struct PlaylistOverlayView: View {
             // 播放列表内容
             VStack(spacing: 0) {
                 // 标题栏
-                playlistHeader
+                HStack {
+                    Text("播放列表")
+                        .font(.headline)
+                    
+                    Spacer()
+                    
+                    // 清空按钮
+                    Button(action: {
+                        showClearConfirmation = true
+                    }) {
+                        Image(systemName: "trash")
+                            .foregroundColor(.red)
+                            .imageScale(.large)
+                    }
+                    .padding(.trailing, 8)
+                    
+                    Button(action: {
+                        showPlaylist = false
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.gray)
+                            .imageScale(.large)
+                    }
+                }
+                .padding()
+                .background(Color(.systemBackground).opacity(0.9))
                 
                 // 列表内容
                 ScrollViewReader { proxy in
@@ -624,26 +650,17 @@ struct PlaylistOverlayView: View {
             .shadow(radius: 20)
             .frame(maxWidth: .infinity, maxHeight: 400)
             .padding(.horizontal, 20)
-        }
-    }
-    
-    private var playlistHeader: some View {
-        HStack {
-            Text("播放列表")
-                .font(.headline)
-            
-            Spacer()
-            
-            Button(action: {
-                showPlaylist = false
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundColor(.gray)
-                    .imageScale(.large)
+            .alert(isPresented: $showClearConfirmation) {
+                Alert(
+                    title: Text("确认清空"),
+                    message: Text("确定要清空所有音乐吗？此操作无法撤销。"),
+                    primaryButton: .destructive(Text("清空")) {
+                        clearAllMusic()
+                    },
+                    secondaryButton: .cancel(Text("取消"))
+                )
             }
         }
-        .padding()
-        .background(Color(.systemBackground).opacity(0.9))
     }
     
     private func scrollToCurrentSong() {
@@ -674,6 +691,16 @@ struct PlaylistOverlayView: View {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
+    }
+    
+    // 清空所有音乐
+    private func clearAllMusic() {
+        // 停止当前播放
+        playerViewModel.clearPlayback()
+        // 清空本地音乐管理器中的音乐文件
+        LocalMusicManager.shared.clearAllMusic()
+        // 关闭播放列表
+        showPlaylist = false
     }
 }
 

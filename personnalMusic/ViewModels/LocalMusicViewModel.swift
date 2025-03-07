@@ -12,19 +12,31 @@ class LocalMusicViewModel: ObservableObject {
     
     // 刷新音乐列表
     func refreshMusicList() {
-        musicFolders = LocalMusicManager.shared.getMusicByFolders()
+        let allFiles = LocalMusicManager.shared.getAllMusicFiles()
+        
+        // 按文件夹分组并排序
+        let groupedFiles = Dictionary(grouping: allFiles) { $0.folderPath }
+        
+        // 将分组后的文件转换为 MusicFolder 数组，并对文件进行排序
+        musicFolders = groupedFiles.map { folderPath, files in
+            // 对每个文件夹中的文件按标题字母顺序排序
+            let sortedFiles = files.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            return MusicFolder(path: folderPath, files: sortedFiles)
+        }
+        // 对文件夹按路径字母顺序排序
+        .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
     
     // 播放音乐文件
-    func playMusic(_ musicFile: MusicFile, playerViewModel: PlayerViewModel, selectedTab: Binding<Int>) {
-        if let url = LocalMusicManager.shared.getAccessibleURL(for: musicFile) {
+    func playMusic(_ file: MusicFile, playerViewModel: PlayerViewModel, selectedTab: Binding<Int>) {
+        if let url = LocalMusicManager.shared.getAccessibleURL(for: file) {
             // 保存最后播放的歌曲ID
-            LocalMusicManager.shared.saveLastPlayedSong(id: musicFile.id)
+            LocalMusicManager.shared.saveLastPlayedSong(id: file.id)
             
             let song = Song(
-                title: musicFile.title,
-                artist: musicFile.artist,
-                duration: musicFile.duration,
+                title: file.title,
+                artist: file.artist,
+                duration: file.duration,
                 url: url
             )
             playerViewModel.playSong(song)
