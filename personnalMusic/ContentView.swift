@@ -66,19 +66,8 @@ struct PlayerContentView: View {
             }
             .padding(.top, 5)
             
-            // 播放进度
-            PulsingProgressView(
-                progress: Double(playerViewModel.progress),
-                isPlaying: playerViewModel.isPlaying,
-                onSeek: { playerViewModel.seek(to: Float($0)) },
-                currentTime: playerViewModel.currentTimeString,
-                duration: playerViewModel.durationString
-            )
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
-            
             // 播放控制
-            PlaybackControlsView(playerViewModel: playerViewModel)
+            PlayerControlsView(playerViewModel: playerViewModel)
                 .padding(.top, 10)
             
             // 播放列表按钮
@@ -105,10 +94,28 @@ struct PlayerContentView: View {
             }
         }
         .onAppear {
-            // 加载示例数据
-            if playerViewModel.playlist.isEmpty {
-                playerViewModel.playlist = Song.samples
-                if let firstSong = Song.samples.first {
+            // 加载所有本地音乐文件到播放列表
+            let allFiles = LocalMusicManager.shared.getAllMusicFiles()
+            let songs = allFiles.compactMap { file -> Song? in
+                guard let url = LocalMusicManager.shared.getAccessibleURL(for: file) else {
+                    return nil
+                }
+                return Song(
+                    title: file.title,
+                    artist: file.artist,
+                    duration: file.duration,
+                    url: url
+                )
+            }
+            
+            // 更新播放列表
+            if !songs.isEmpty {
+                print("正在加载 \(songs.count) 首歌曲到播放列表")
+                playerViewModel.playlist = songs
+                
+                // 如果当前没有正在播放的歌曲，设置第一首歌
+                if playerViewModel.currentSong == nil, let firstSong = songs.first {
+                    print("设置第一首歌曲：\(firstSong.title)")
                     playerViewModel.currentSong = firstSong
                     playerViewModel.duration = firstSong.duration
                 }
@@ -435,9 +442,11 @@ struct SongInfoView: View {
 // MARK: - 播放控制区域
 struct PlayerControlsView: View {
     @ObservedObject var playerViewModel: PlayerViewModel
+    @State private var showSpeedPicker = false
     
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 15) {
+            // 播放进度
             PulsingProgressView(
                 progress: Double(playerViewModel.progress),
                 isPlaying: playerViewModel.isPlaying,
@@ -448,10 +457,37 @@ struct PlayerControlsView: View {
                 duration: playerViewModel.durationString
             )
             .padding(.horizontal)
-            .padding(.top, 15)
             
-            PlaybackControlsView(playerViewModel: playerViewModel)
-                .padding(.top, 10)
+            // 播放控制按钮
+            HStack(spacing: 40) {
+                // 上一首按钮
+                Button(action: {
+                    playerViewModel.previousTrack()
+                }) {
+                    Image(systemName: "backward.fill")
+                        .font(.system(size: 32))
+                        .frame(width: 50, height: 50)
+                }
+                
+                // 播放/暂停按钮
+                Button(action: {
+                    playerViewModel.togglePlayPause()
+                }) {
+                    Image(systemName: playerViewModel.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 56))
+                        .frame(width: 70, height: 70)
+                }
+                
+                // 下一首按钮
+                Button(action: {
+                    playerViewModel.nextTrack()
+                }) {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: 32))
+                        .frame(width: 50, height: 50)
+                }
+            }
+            .foregroundColor(.primary)
         }
     }
 }

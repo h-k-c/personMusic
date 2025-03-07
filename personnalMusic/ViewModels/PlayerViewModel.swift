@@ -147,28 +147,49 @@ class PlayerViewModel: ObservableObject {
     
     /// 播放上一首歌曲
     func previousTrack() {
-        guard let currentIndex = getCurrentIndex() else { return }
-        let newIndex = (currentIndex - 1 + playlist.count) % playlist.count
-        playSong(playlist[newIndex])
+        // 如果当前没有播放歌曲，从最后一首开始播放
+        if currentSong == nil {
+            if let lastSong = playlist.last {
+                playSong(lastSong)
+            }
+            return
+        }
+        
+        guard let currentIndex = getCurrentIndex() else {
+            if let lastSong = playlist.last {
+                playSong(lastSong)
+            }
+            return
+        }
+        
+        // 如果不是第一首歌，才播放上一首
+        if currentIndex > 0 {
+            let previousSong = playlist[currentIndex - 1]
+            playSong(previousSong)
+        }
     }
     
     /// 播放下一首歌曲
     func nextTrack() {
-        guard let currentIndex = getCurrentIndex() else { return }
-        
-        switch repeatMode {
-        case .one:
-            // 单曲循环，重新播放当前歌曲
-            playSong(playlist[currentIndex])
-        case .all:
-            // 列表循环
-            let newIndex = (currentIndex + 1) % playlist.count
-            playSong(playlist[newIndex])
-        case .none:
-            // 不循环，到达末尾停止
-            if currentIndex < playlist.count - 1 {
-                playSong(playlist[currentIndex + 1])
+        // 如果当前没有播放歌曲，从第一首开始播放
+        if currentSong == nil {
+            if let firstSong = playlist.first {
+                playSong(firstSong)
             }
+            return
+        }
+        
+        guard let currentIndex = getCurrentIndex() else {
+            if let firstSong = playlist.first {
+                playSong(firstSong)
+            }
+            return
+        }
+        
+        // 如果不是最后一首歌，才播放下一首
+        if currentIndex < playlist.count - 1 {
+            let nextSong = playlist[currentIndex + 1]
+            playSong(nextSong)
         }
     }
     
@@ -243,56 +264,40 @@ class PlayerViewModel: ObservableObject {
     /// 播放指定的歌曲
     /// - Parameter song: 要播放的歌曲
     func playSong(_ song: Song) {
-        guard let url = song.url else {
-            print("错误：歌曲URL为空")
-            return
-        }
+        guard let url = song.url else { return }
         
         // 验证URL是否可访问
-        guard FileManager.default.fileExists(atPath: url.path) else {
-            print("错误：文件不存在 - \(url.path)")
-            return
-        }
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
         
-        do {
-            // 尝试访问文件
-            if url.startAccessingSecurityScopedResource() {
-                defer {
-                    url.stopAccessingSecurityScopedResource()
-                }
-                
-                currentSong = song
-                let playerItem = AVPlayerItem(url: url)
-                
-                // 移除旧的观察者
-                removeTimeObserver()
-                NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-                
-                // 创建新的播放器
-                player = AVPlayer(playerItem: playerItem)
-                player?.volume = Float(volume)
-                player?.rate = Float(playbackRate.rawValue)
-                
-                // 设置新的观察者
-                setupTimeObserver()
-                NotificationCenter.default.addObserver(
-                    self,
-                    selector: #selector(playerItemDidFinish),
-                    name: .AVPlayerItemDidPlayToEndTime,
-                    object: playerItem
-                )
-                
-                // 保存播放状态
-                savePlaybackState()
-                
-                // 开始播放
-                play()
-            } else {
-                print("错误：无法访问安全作用域的文件")
-            }
-        } catch {
-            print("播放歌曲时发生错误: \(error.localizedDescription)")
-        }
+        // 设置当前歌曲
+        currentSong = song
+        
+        // 创建新的播放器项
+        let playerItem = AVPlayerItem(url: url)
+        
+        // 移除旧的观察者
+        removeTimeObserver()
+        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+        
+        // 创建新的播放器
+        player = AVPlayer(playerItem: playerItem)
+        player?.volume = Float(volume)
+        player?.rate = Float(playbackRate.rawValue)
+        
+        // 设置新的观察者
+        setupTimeObserver()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(playerItemDidFinish),
+            name: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem
+        )
+        
+        // 保存播放状态
+        savePlaybackState()
+        
+        // 开始播放
+        play()
     }
     
     // MARK: - 播放本地文件
@@ -378,9 +383,15 @@ class PlayerViewModel: ObservableObject {
         }
         playlist.append(contentsOf: newSongs)
         
-        // 如果当前没有正在播放的歌曲，播放第一首新添加的歌曲
+        // 如果当前没有正在播放的歌曲，设置第一首歌但不自动播放
         if currentSong == nil, let firstSong = newSongs.first {
-            playSong(firstSong)
+            currentSong = firstSong
+            let playerItem = AVPlayerItem(url: firstSong.url!)
+            player = AVPlayer(playerItem: playerItem)
+            player?.volume = Float(volume)
+            player?.rate = 0 // 确保不自动播放
+            duration = firstSong.duration
+            setupTimeObserver()
         }
     }
     
@@ -413,7 +424,10 @@ class PlayerViewModel: ObservableObject {
     /// - Returns: 当前歌曲的索引，如果没有当前歌曲则返回 nil
     private func getCurrentIndex() -> Int? {
         guard let currentSong = currentSong else { return nil }
-        return playlist.firstIndex(where: { $0.id == currentSong.id })
+        
+        return playlist.firstIndex(where: { 
+            $0.title == currentSong.title && $0.artist == currentSong.artist
+        })
     }
     
     private func setupTimeObserver() {
@@ -641,6 +655,8 @@ class PlayerViewModel: ObservableObject {
         return "\(currentTimeString) / \(durationString)"
     }
 }
+
+
 
 
 
