@@ -45,10 +45,10 @@ class PlayerViewModel: ObservableObject {
     private var shuffledPlaylist: [Song] = []
     
     // MARK: - 枚举
-    enum RepeatMode {
-        case none
-        case all
-        case one
+    enum RepeatMode: Int {
+        case none = 0
+        case all = 1
+        case one = 2
     }
     
     enum PlaybackRate: Double, CaseIterable, Identifiable {
@@ -82,6 +82,9 @@ class PlayerViewModel: ObservableObject {
         self.playlist = []
         setupAudioSession()
         setupRemoteCommandCenter()
+        
+        // 恢复上次播放状态
+        restoreLastPlayback()
     }
     
     /// 设置音频会话
@@ -240,28 +243,60 @@ class PlayerViewModel: ObservableObject {
     /// 播放指定的歌曲
     /// - Parameter song: 要播放的歌曲
     func playSong(_ song: Song) {
-        currentSong = song
-        // 这里应该设置实际的音频URL
-        guard let url = song.url else { return }
-        let playerItem = AVPlayerItem(url: url)
-        player = AVPlayer(playerItem: playerItem)
-        player?.volume = Float(volume)
-        player?.rate = Float(playbackRate.rawValue)
+        print("开始播放歌曲: \(song.title)")
         
-        // 设置时间观察器
-        removeTimeObserver()
-        setupTimeObserver()
-        
-        // 设置播放结束通知
-        NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-        NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidFinish), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
-        
-        // 保存最后播放的歌曲ID
-        if let musicFile = LocalMusicManager.shared.getAllMusicFiles().first(where: { $0.title == song.title }) {
-            LocalMusicManager.shared.saveLastPlayedSong(id: musicFile.id)
+        guard let url = song.url else {
+            print("错误：歌曲URL为空")
+            return
         }
         
-        play()
+        // 验证URL是否可访问
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            print("错误：文件不存在 - \(url.path)")
+            return
+        }
+        
+        do {
+            // 尝试访问文件
+            if url.startAccessingSecurityScopedResource() {
+                defer {
+                    url.stopAccessingSecurityScopedResource()
+                }
+                
+                currentSong = song
+                let playerItem = AVPlayerItem(url: url)
+                
+                // 移除旧的观察者
+                removeTimeObserver()
+                NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+                
+                // 创建新的播放器
+                player = AVPlayer(playerItem: playerItem)
+                player?.volume = Float(volume)
+                player?.rate = Float(playbackRate.rawValue)
+                
+                // 设置新的观察者
+                setupTimeObserver()
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(playerItemDidFinish),
+                    name: .AVPlayerItemDidPlayToEndTime,
+                    object: playerItem
+                )
+                
+                // 保存播放状态
+                savePlaybackState()
+                
+                // 开始播放
+                play()
+                
+                print("歌曲开始播放成功")
+            } else {
+                print("错误：无法访问安全作用域的文件")
+            }
+        } catch {
+            print("播放歌曲时发生错误: \(error.localizedDescription)")
+        }
     }
     
     // MARK: - 播放本地文件
@@ -386,7 +421,10 @@ class PlayerViewModel: ObservableObject {
     }
     
     private func setupTimeObserver() {
-        timeObserver = player?.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
+        // 每0.5秒更新一次进度
+        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+        
+        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self,
                   let duration = self.player?.currentItem?.duration,
                   !duration.seconds.isNaN else { return }
@@ -394,6 +432,11 @@ class PlayerViewModel: ObservableObject {
             self.currentTime = time.seconds
             self.duration = duration.seconds
             self.progress = Float(self.currentTime / self.duration)
+            
+            // 保存当前状态
+            self.savePlaybackState()
+            
+            // 更新锁屏信息
             self.updateNowPlaying()
         }
     }
@@ -423,8 +466,159 @@ class PlayerViewModel: ObservableObject {
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo
     }
     
+    // MARK: - 保存播放状态
+    func savePlaybackState() {
+        guard let currentSong = currentSong else { return }
+        
+        print("保存播放状态...")
+        print("当前歌曲: \(currentSong.title)")
+        print("当前进度: \(currentTime)/\(duration)")
+        
+        // 保存当前歌曲信息
+        let songDict: [String: Any] = [
+            "id": currentSong.id.uuidString,
+            "title": currentSong.title,
+            "artist": currentSong.artist,
+            "duration": currentSong.duration,
+            "url": currentSong.url?.absoluteString ?? ""
+        ]
+        UserDefaults.standard.set(songDict, forKey: "lastPlayedSongInfo")
+        
+        // 保存播放进度和时长
+        UserDefaults.standard.set(currentTime, forKey: "lastPlaybackTime")
+        UserDefaults.standard.set(duration, forKey: "lastPlaybackDuration")
+        UserDefaults.standard.set(progress, forKey: "lastPlaybackProgress")
+        
+        // 保存播放器状态
+        UserDefaults.standard.set(volume, forKey: "lastPlaybackVolume")
+        UserDefaults.standard.set(playbackRate.rawValue, forKey: "lastPlaybackRate")
+        UserDefaults.standard.set(repeatMode.rawValue, forKey: "lastRepeatMode")
+        UserDefaults.standard.set(isShuffleEnabled, forKey: "lastShuffleEnabled")
+        
+        // 立即同步
+        UserDefaults.standard.synchronize()
+        
+        print("播放状态保存完成")
+    }
+    
+    // MARK: - 恢复上次播放
+    func restoreLastPlayback() {
+        print("开始恢复播放状态...")
+        
+        // 先加载所有音乐文件到播放列表
+        let allFiles = LocalMusicManager.shared.getAllMusicFiles()
+        print("获取到音乐文件数量: \(allFiles.count)")
+        
+        playlist = allFiles.compactMap { file -> Song? in
+            guard let url = LocalMusicManager.shared.getAccessibleURL(for: file) else {
+                print("无法访问文件URL: \(file.title)")
+                return nil
+            }
+            return Song(
+                title: file.title,
+                artist: file.artist,
+                duration: file.duration,
+                url: url
+            )
+        }
+        print("成功加载到播放列表的歌曲数量: \(playlist.count)")
+        
+        // 恢复播放器状态
+        if let lastVolume = UserDefaults.standard.object(forKey: "lastPlaybackVolume") as? Double {
+            volume = lastVolume
+            print("恢复音量: \(volume)")
+        }
+        
+        if let lastRate = UserDefaults.standard.object(forKey: "lastPlaybackRate") as? Double,
+           let rate = PlaybackRate(rawValue: lastRate) {
+            playbackRate = rate
+            print("恢复播放速率: \(rate.rawValue)")
+        }
+        
+        if let lastRepeatMode = UserDefaults.standard.object(forKey: "lastRepeatMode") as? Int {
+            switch lastRepeatMode {
+            case 0: repeatMode = .none
+            case 1: repeatMode = .all
+            case 2: repeatMode = .one
+            default: repeatMode = .none
+            }
+            print("恢复循环模式: \(repeatMode)")
+        }
+        
+        isShuffleEnabled = UserDefaults.standard.bool(forKey: "lastShuffleEnabled")
+        print("恢复随机播放状态: \(isShuffleEnabled)")
+        
+        // 从 UserDefaults 获取上次播放的歌曲信息
+        if let songDict = UserDefaults.standard.dictionary(forKey: "lastPlayedSongInfo"),
+           let title = songDict["title"] as? String,
+           let artist = songDict["artist"] as? String,
+           let duration = songDict["duration"] as? TimeInterval,
+           let urlString = songDict["url"] as? String,
+           let url = URL(string: urlString) {
+            
+            print("找到上次播放的歌曲: \(title)")
+            
+            // 创建歌曲对象
+            let song = Song(
+                title: title,
+                artist: artist,
+                duration: duration,
+                url: url
+            )
+            
+            // 设置当前歌曲但不自动播放
+            currentSong = song
+            print("设置当前歌曲: \(song.title)")
+            
+            // 恢复上次的播放进度和时长
+            if let lastTime = UserDefaults.standard.object(forKey: "lastPlaybackTime") as? TimeInterval {
+                currentTime = lastTime
+                print("恢复播放时间: \(currentTime)")
+            }
+            
+            if let lastDuration = UserDefaults.standard.object(forKey: "lastPlaybackDuration") as? TimeInterval {
+                self.duration = lastDuration
+                print("恢复总时长: \(duration)")
+            }
+            
+            if let lastProgress = UserDefaults.standard.object(forKey: "lastPlaybackProgress") as? Float {
+                progress = lastProgress
+                print("恢复进度: \(progress)")
+            }
+            
+            // 创建播放器但不开始播放
+            let playerItem = AVPlayerItem(url: url)
+            player = AVPlayer(playerItem: playerItem)
+            player?.volume = Float(volume)
+            player?.rate = Float(playbackRate.rawValue)
+            
+            // 设置播放位置到上次的进度
+            let targetTime = CMTime(seconds: currentTime, preferredTimescale: 1000)
+            player?.seek(to: targetTime)
+            print("已定位到上次播放位置: \(currentTime)")
+            
+            // 设置时间观察器
+            setupTimeObserver()
+            
+            // 设置播放结束通知
+            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidFinish), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+            
+            // 更新锁屏信息
+            updateNowPlaying()
+            
+            print("播放状态恢复完成")
+        } else {
+            print("未找到上次播放的歌曲记录")
+        }
+    }
+    
     // MARK: - 析构方法
     deinit {
+        // 保存播放状态
+        savePlaybackState()
+        
+        // 清理观察者
         NotificationCenter.default.removeObserver(self)
         removeTimeObserver()
     }
@@ -448,50 +642,7 @@ class PlayerViewModel: ObservableObject {
         // 更新锁屏信息
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
-    
-    // 恢复上次播放
-    func restoreLastPlayback() {
-        // 获取上次播放的歌曲
-        if let lastPlayedSong = LocalMusicManager.shared.getLastPlayedSong(),
-           let url = LocalMusicManager.shared.getAccessibleURL(for: lastPlayedSong) {
-            
-            // 创建歌曲对象
-            let song = Song(
-                title: lastPlayedSong.title,
-                artist: lastPlayedSong.artist,
-                duration: lastPlayedSong.duration,
-                url: url
-            )
-            
-            // 设置当前歌曲但不自动播放
-            currentSong = song
-            duration = song.duration
-            
-            // 创建播放器但不开始播放
-            let playerItem = AVPlayerItem(url: url)
-            player = AVPlayer(playerItem: playerItem)
-            player?.volume = Float(volume)
-            player?.rate = Float(playbackRate.rawValue)
-            
-            // 设置时间观察器
-            setupTimeObserver()
-            
-            // 设置播放结束通知
-            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-            NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidFinish), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
-            
-            // 加载播放列表
-            let allFiles = LocalMusicManager.shared.getAllMusicFiles()
-            playlist = allFiles.compactMap { file -> Song? in
-                guard let url = LocalMusicManager.shared.getAccessibleURL(for: file) else { return nil }
-                return Song(
-                    title: file.title,
-                    artist: file.artist,
-                    duration: file.duration,
-                    url: url
-                )
-            }
-        }
-    }
 }
+
+
 
