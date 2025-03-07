@@ -243,8 +243,6 @@ class PlayerViewModel: ObservableObject {
     /// 播放指定的歌曲
     /// - Parameter song: 要播放的歌曲
     func playSong(_ song: Song) {
-        print("开始播放歌曲: \(song.title)")
-        
         guard let url = song.url else {
             print("错误：歌曲URL为空")
             return
@@ -289,8 +287,6 @@ class PlayerViewModel: ObservableObject {
                 
                 // 开始播放
                 play()
-                
-                print("歌曲开始播放成功")
             } else {
                 print("错误：无法访问安全作用域的文件")
             }
@@ -469,10 +465,7 @@ class PlayerViewModel: ObservableObject {
     // MARK: - 保存播放状态
     func savePlaybackState() {
         guard let currentSong = currentSong else { return }
-        
-        print("保存播放状态...")
-        print("当前歌曲: \(currentSong.title)")
-        print("当前进度: \(currentTime)/\(duration)")
+    
         
         // 保存当前歌曲信息
         let songDict: [String: Any] = [
@@ -498,20 +491,15 @@ class PlayerViewModel: ObservableObject {
         // 立即同步
         UserDefaults.standard.synchronize()
         
-        print("播放状态保存完成")
     }
     
     // MARK: - 恢复上次播放
     func restoreLastPlayback() {
-        print("开始恢复播放状态...")
-        
         // 先加载所有音乐文件到播放列表
         let allFiles = LocalMusicManager.shared.getAllMusicFiles()
-        print("获取到音乐文件数量: \(allFiles.count)")
         
         playlist = allFiles.compactMap { file -> Song? in
             guard let url = LocalMusicManager.shared.getAccessibleURL(for: file) else {
-                print("无法访问文件URL: \(file.title)")
                 return nil
             }
             return Song(
@@ -521,18 +509,15 @@ class PlayerViewModel: ObservableObject {
                 url: url
             )
         }
-        print("成功加载到播放列表的歌曲数量: \(playlist.count)")
         
         // 恢复播放器状态
         if let lastVolume = UserDefaults.standard.object(forKey: "lastPlaybackVolume") as? Double {
             volume = lastVolume
-            print("恢复音量: \(volume)")
         }
         
         if let lastRate = UserDefaults.standard.object(forKey: "lastPlaybackRate") as? Double,
            let rate = PlaybackRate(rawValue: lastRate) {
             playbackRate = rate
-            print("恢复播放速率: \(rate.rawValue)")
         }
         
         if let lastRepeatMode = UserDefaults.standard.object(forKey: "lastRepeatMode") as? Int {
@@ -542,11 +527,9 @@ class PlayerViewModel: ObservableObject {
             case 2: repeatMode = .one
             default: repeatMode = .none
             }
-            print("恢复循环模式: \(repeatMode)")
         }
         
         isShuffleEnabled = UserDefaults.standard.bool(forKey: "lastShuffleEnabled")
-        print("恢复随机播放状态: \(isShuffleEnabled)")
         
         // 从 UserDefaults 获取上次播放的歌曲信息
         if let songDict = UserDefaults.standard.dictionary(forKey: "lastPlayedSongInfo"),
@@ -555,8 +538,6 @@ class PlayerViewModel: ObservableObject {
            let duration = songDict["duration"] as? TimeInterval,
            let urlString = songDict["url"] as? String,
            let url = URL(string: urlString) {
-            
-            print("找到上次播放的歌曲: \(title)")
             
             // 创建歌曲对象
             let song = Song(
@@ -568,34 +549,29 @@ class PlayerViewModel: ObservableObject {
             
             // 设置当前歌曲但不自动播放
             currentSong = song
-            print("设置当前歌曲: \(song.title)")
             
             // 恢复上次的播放进度和时长
             if let lastTime = UserDefaults.standard.object(forKey: "lastPlaybackTime") as? TimeInterval {
                 currentTime = lastTime
-                print("恢复播放时间: \(currentTime)")
             }
             
             if let lastDuration = UserDefaults.standard.object(forKey: "lastPlaybackDuration") as? TimeInterval {
                 self.duration = lastDuration
-                print("恢复总时长: \(duration)")
             }
             
             if let lastProgress = UserDefaults.standard.object(forKey: "lastPlaybackProgress") as? Float {
                 progress = lastProgress
-                print("恢复进度: \(progress)")
             }
             
             // 创建播放器但不开始播放
             let playerItem = AVPlayerItem(url: url)
             player = AVPlayer(playerItem: playerItem)
             player?.volume = Float(volume)
-            player?.rate = Float(playbackRate.rawValue)
+            player?.rate = 0 // 确保初始速率为0，不自动播放
             
             // 设置播放位置到上次的进度
             let targetTime = CMTime(seconds: currentTime, preferredTimescale: 1000)
             player?.seek(to: targetTime)
-            print("已定位到上次播放位置: \(currentTime)")
             
             // 设置时间观察器
             setupTimeObserver()
@@ -607,9 +583,8 @@ class PlayerViewModel: ObservableObject {
             // 更新锁屏信息
             updateNowPlaying()
             
-            print("播放状态恢复完成")
-        } else {
-            print("未找到上次播放的歌曲记录")
+            // 确保播放状态为暂停
+            isPlaying = false
         }
     }
     
@@ -641,6 +616,29 @@ class PlayerViewModel: ObservableObject {
         
         // 更新锁屏信息
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+    
+    // MARK: - 时间格式化
+    /// 格式化时间为 "mm:ss" 格式
+    func formatTime(_ timeInSeconds: TimeInterval) -> String {
+        let minutes = Int(timeInSeconds) / 60
+        let seconds = Int(timeInSeconds) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
+    }
+    
+    /// 获取当前播放时间的格式化字符串
+    var currentTimeString: String {
+        return formatTime(currentTime)
+    }
+    
+    /// 获取总时长的格式化字符串
+    var durationString: String {
+        return formatTime(duration)
+    }
+    
+    /// 获取完整的时间显示字符串
+    var timeDisplayString: String {
+        return "\(currentTimeString) / \(durationString)"
     }
 }
 

@@ -70,7 +70,9 @@ struct PlayerContentView: View {
             PulsingProgressView(
                 progress: Double(playerViewModel.progress),
                 isPlaying: playerViewModel.isPlaying,
-                onSeek: { playerViewModel.seek(to: Float($0)) }
+                onSeek: { playerViewModel.seek(to: Float($0)) },
+                currentTime: playerViewModel.currentTimeString,
+                duration: playerViewModel.durationString
             )
             .padding(.horizontal, 20)
             .padding(.top, 20)
@@ -441,7 +443,9 @@ struct PlayerControlsView: View {
                 isPlaying: playerViewModel.isPlaying,
                 onSeek: { progress in
                     playerViewModel.seek(to: Float(progress))
-                }
+                },
+                currentTime: playerViewModel.currentTimeString,
+                duration: playerViewModel.durationString
             )
             .padding(.horizontal)
             .padding(.top, 15)
