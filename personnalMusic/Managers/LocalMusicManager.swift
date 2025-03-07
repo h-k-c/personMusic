@@ -260,7 +260,16 @@ class LocalMusicManager {
     
     // 获取所有音乐文件（用于播放列表）
     func getAllMusicFiles() -> [MusicFile] {
-        return loadMusicFiles().sorted { $0.title < $1.title }
+        // 获取按文件夹组织的音乐
+        let folders = getMusicByFolders()
+        
+        // 按照文件夹顺序展平列表
+        var allFiles: [MusicFile] = []
+        for folder in folders {
+            allFiles.append(contentsOf: folder.files)
+        }
+        
+        return allFiles
     }
     
     // 获取播放列表（从指定音乐文件开始的20首歌）
@@ -270,7 +279,31 @@ class LocalMusicManager {
             return []
         }
         
-        let endIndex = min(startIndex + 20, allFiles.count)
+        let endIndex = min(startIndex + 50, allFiles.count)
         return Array(allFiles[startIndex..<endIndex])
     }
+    
+    // 清空所有音乐文件
+    func clearAllMusic() {
+        userDefaults.removeObject(forKey: musicFilesKey)
+        userDefaults.removeObject(forKey: musicFoldersKey)
+        userDefaults.removeObject(forKey: "lastPlayedSongID")
+        userDefaults.synchronize()
+    }
+    
+    // 保存最后播放的歌曲ID
+    func saveLastPlayedSong(id: String) {
+        userDefaults.set(id, forKey: "lastPlayedSongID")
+    }
+    
+    // 获取最后播放的歌曲
+    func getLastPlayedSong() -> MusicFile? {
+        guard let lastPlayedID = userDefaults.string(forKey: "lastPlayedSongID") else {
+            return nil
+        }
+        
+        return loadMusicFiles().first { $0.id == lastPlayedID }
+    }
 }
+
+

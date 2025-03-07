@@ -36,7 +36,7 @@ class PlayerViewModel: ObservableObject {
     
     // MARK: - 私有属性
     /// AVPlayer 实例，用于实际的音频播放
-    private var player: AVPlayer?
+    var player: AVPlayer?
     /// 时间观察器，用于监控播放进度
     private var timeObserver: Any?
     /// 原始播放列表
@@ -130,13 +130,13 @@ class PlayerViewModel: ObservableObject {
         }
     }
     
-    private func play() {
+    func play() {
         player?.play()
         isPlaying = true
         updateNowPlaying()
     }
     
-    private func pause() {
+    func pause() {
         player?.pause()
         isPlaying = false
         updateNowPlaying()
@@ -174,9 +174,28 @@ class PlayerViewModel: ObservableObject {
         player?.volume = Float(value)
     }
     
+    // 跳转到指定进度
     func seek(to progress: Float) {
-        self.progress = progress
-        currentTime = Double(progress) * duration
+        guard let player = player, let currentSong = currentSong else { return }
+        
+        // 计算目标时间
+        let targetTime = Double(progress) * currentSong.duration
+        
+        // 创建 CMTime
+        let time = CMTime(seconds: targetTime, preferredTimescale: 1000)
+        
+        // 跳转到指定时间
+        player.seek(to: time) { [weak self] finished in
+            if finished {
+                // 更新当前进度
+                self?.progress = progress
+                
+                // 如果当前是暂停状态，保持暂停
+                if !(self?.isPlaying ?? true) {
+                    self?.player?.pause()
+                }
+            }
+        }
     }
     
     // MARK: - 倍速播放控制
@@ -236,6 +255,11 @@ class PlayerViewModel: ObservableObject {
         // 设置播放结束通知
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidFinish), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+        
+        // 保存最后播放的歌曲ID
+        if let musicFile = LocalMusicManager.shared.getAllMusicFiles().first(where: { $0.title == song.title }) {
+            LocalMusicManager.shared.saveLastPlayedSong(id: musicFile.id)
+        }
         
         play()
     }
@@ -405,51 +429,69 @@ class PlayerViewModel: ObservableObject {
         removeTimeObserver()
     }
     
-    // 更新播放列表
-    func updatePlaylist(_ songs: [Song]) {
-        self.playlist = songs
-        self.currentSong = songs.first
-        self.duration = songs.first?.duration ?? 0
-        self.currentTime = 0
-        self.progress = 0
-        self.isPlaying = false
-        self.repeatMode = .none
-        self.isShuffleEnabled = false
-        self.playbackRate = .normal
-        self.player = nil
-        self.timeObserver = nil
-        self.originalPlaylist = []
-        self.shuffledPlaylist = []
-        self.updateNowPlaying()
-    }
-    
-    // 从头开始播放
-    func playFromBeginning() {
-        guard !playlist.isEmpty else { return }
-        currentSong = playlist.first
-        currentTime = 0
-        progress = 0
-        isPlaying = true
-        updateNowPlaying()
-        startPlayback()
-    }
-    
-    // 内部播放方法
-    private func startPlayback() {
-        guard let song = currentSong,
-              let songUrl = song.url else { return }
+    // 清空播放状态
+    func clearPlayback() {
+        // 停止当前播放
+        player?.pause()
         
-        // 设置音频播放器
-        do {
-            let audioPlayer = AVPlayer(url: songUrl)
-            self.player = audioPlayer
-            audioPlayer.volume = Float(volume)
-            audioPlayer.rate = Float(playbackRate.rawValue)
-            audioPlayer.play()
-            self.isPlaying = true
-            self.updateNowPlaying()
-        } catch {
-            print("播放错误: \(error)")
+        // 移除时间观察器
+        removeTimeObserver()
+        
+        // 重置所有状态
+        currentSong = nil
+        playlist = []
+        isPlaying = false
+        currentTime = 0
+        duration = 30.0
+        progress = 0.0
+        
+        // 更新锁屏信息
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+    }
+    
+    // 恢复上次播放
+    func restoreLastPlayback() {
+        // 获取上次播放的歌曲
+        if let lastPlayedSong = LocalMusicManager.shared.getLastPlayedSong(),
+           let url = LocalMusicManager.shared.getAccessibleURL(for: lastPlayedSong) {
+            
+            // 创建歌曲对象
+            let song = Song(
+                title: lastPlayedSong.title,
+                artist: lastPlayedSong.artist,
+                duration: lastPlayedSong.duration,
+                url: url
+            )
+            
+            // 设置当前歌曲但不自动播放
+            currentSong = song
+            duration = song.duration
+            
+            // 创建播放器但不开始播放
+            let playerItem = AVPlayerItem(url: url)
+            player = AVPlayer(playerItem: playerItem)
+            player?.volume = Float(volume)
+            player?.rate = Float(playbackRate.rawValue)
+            
+            // 设置时间观察器
+            setupTimeObserver()
+            
+            // 设置播放结束通知
+            NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
+            NotificationCenter.default.addObserver(self, selector: #selector(playerItemDidFinish), name: .AVPlayerItemDidPlayToEndTime, object: playerItem)
+            
+            // 加载播放列表
+            let allFiles = LocalMusicManager.shared.getAllMusicFiles()
+            playlist = allFiles.compactMap { file -> Song? in
+                guard let url = LocalMusicManager.shared.getAccessibleURL(for: file) else { return nil }
+                return Song(
+                    title: file.title,
+                    artist: file.artist,
+                    duration: file.duration,
+                    url: url
+                )
+            }
         }
     }
-} 
+}
+

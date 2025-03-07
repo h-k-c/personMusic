@@ -10,7 +10,7 @@ import SwiftUI
 import AVFoundation
 
 struct ContentView: View {
-    @StateObject private var playerViewModel: PlayerViewModel = PlayerViewModel()
+    @StateObject private var playerViewModel = PlayerViewModel()
     @State private var selectedTab = 0
     
     var body: some View {
@@ -24,14 +24,18 @@ struct ContentView: View {
                 .tag(0)
             
             // 本地音乐标签页
-            LocalMusicView(playerViewModel: playerViewModel)
+            LocalMusicView(playerViewModel: playerViewModel, selectedTab: $selectedTab)
                 .tabItem {
                     Image(systemName: "folder.fill")
                     Text("本地音乐")
                 }
                 .tag(1)
         }
-        .accentColor(.black)
+        .accentColor(.primary)
+        .onAppear {
+            // 恢复上次播放
+            playerViewModel.restoreLastPlayback()
+        }
     }
 }
 
@@ -521,30 +525,43 @@ struct PlaylistOverlayView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(spacing: 0) {
+                            // 使用 LocalMusicManager 获取的音乐文件列表，保持顺序一致
                             ForEach(LocalMusicManager.shared.getAllMusicFiles()) { file in
                                 VStack(spacing: 0) {
-                                    PlaylistItemView(
-                                        song: Song(
-                                            title: file.title,
-                                            artist: file.artist,
-                                            duration: file.duration,
-                                            url: file.url
-                                        ),
-                                        isPlaying: playerViewModel.isPlaying && playerViewModel.currentSong?.url == file.url,
-                                        isSelected: playerViewModel.currentSong?.url == file.url,
-                                        onTap: {
-                                            if let url = file.resolveURL() {
-                                                let song = Song(
-                                                    title: file.title,
-                                                    artist: file.artist,
-                                                    duration: file.duration,
-                                                    url: url
-                                                )
-                                                playerViewModel.playSong(song)
+                                    Button(action: {
+                                        playMusicFile(file)
+                                    }) {
+                                        HStack {
+                                            // 播放指示器
+                                            if playerViewModel.currentSong?.title == file.title {
+                                                Image(systemName: "play.fill")
+                                                    .foregroundColor(.accentColor)
+                                            } else {
+                                                Image(systemName: "music.note")
+                                                    .foregroundColor(.gray)
                                             }
+                                            
+                                            // 歌曲信息
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(file.title)
+                                                    .lineLimit(1)
+                                                    .foregroundColor(.primary)
+                                                Text(file.artist)
+                                                    .font(.caption)
+                                                    .foregroundColor(.gray)
+                                                    .lineLimit(1)
+                                            }
+                                            
+                                            Spacer()
+                                            
+                                            // 时长
+                                            Text(formatDuration(file.duration))
+                                                .font(.caption)
+                                                .foregroundColor(.gray)
                                         }
-                                    )
-                                    .padding(.horizontal)
+                                        .padding(.horizontal)
+                                        .padding(.vertical, 8)
+                                    }
                                     .id(file.id)
                                     
                                     if file.id != LocalMusicManager.shared.getAllMusicFiles().last?.id {
@@ -591,7 +608,7 @@ struct PlaylistOverlayView: View {
     
     private func scrollToCurrentSong() {
         guard let currentSong = playerViewModel.currentSong,
-              let currentFile = LocalMusicManager.shared.getAllMusicFiles().first(where: { $0.url == currentSong.url }) else {
+              let currentFile = LocalMusicManager.shared.getAllMusicFiles().first(where: { $0.title == currentSong.title }) else {
             return
         }
         
@@ -599,7 +616,27 @@ struct PlaylistOverlayView: View {
             scrollProxy?.scrollTo(currentFile.id, anchor: .center)
         }
     }
+    
+    private func playMusicFile(_ file: MusicFile) {
+        if let url = LocalMusicManager.shared.getAccessibleURL(for: file) {
+            let song = Song(
+                title: file.title,
+                artist: file.artist,
+                duration: file.duration,
+                url: url
+            )
+            playerViewModel.playSong(song)
+            showPlaylist = false
+        }
+    }
+    
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
 }
+
 
 
 

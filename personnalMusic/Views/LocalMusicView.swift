@@ -10,14 +10,16 @@ import AVFoundation
 
 struct LocalMusicView: View {
     @ObservedObject var playerViewModel: PlayerViewModel
+    @StateObject private var viewModel = LocalMusicViewModel()
     @State private var showingFilePicker = false
     @State private var showingFolderPicker = false
-    @State private var musicFolders: [MusicFolder] = []
     @State private var showingActionSheet = false
+    @State private var showingClearConfirmation = false
+    @Binding var selectedTab: Int  // 添加标签页绑定
     
     var body: some View {
         List {
-            if musicFolders.isEmpty {
+            if viewModel.musicFolders.isEmpty {
                 VStack(spacing: 20) {
                     Image(systemName: "music.note.list")
                         .font(.system(size: 50))
@@ -36,11 +38,11 @@ struct LocalMusicView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .listRowBackground(Color.clear)
             } else {
-                ForEach(musicFolders) { folder in
+                ForEach(viewModel.musicFolders) { folder in
                     Section(header: Text(folder.path)) {
                         ForEach(folder.files) { file in
                             LocalMusicItemView(musicFile: file) {
-                                playMusic(file)
+                                viewModel.playMusic(file, playerViewModel: playerViewModel, selectedTab: $selectedTab)
                             }
                         }
                     }
@@ -50,8 +52,14 @@ struct LocalMusicView: View {
         .navigationTitle("本地音乐")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button(action: { showingActionSheet = true }) {
-                    Image(systemName: "plus")
+                HStack {
+                    Button(action: { showingClearConfirmation = true }) {
+                        Image(systemName: "trash")
+                    }
+                    
+                    Button(action: { showingActionSheet = true }) {
+                        Image(systemName: "plus")
+                    }
                 }
             }
         }
@@ -64,6 +72,14 @@ struct LocalMusicView: View {
             }
             Button("取消", role: .cancel) {}
         }
+        .alert("清空音乐", isPresented: $showingClearConfirmation) {
+            Button("取消", role: .cancel) {}
+            Button("清空", role: .destructive) {
+                viewModel.clearAllMusic(playerViewModel: playerViewModel)
+            }
+        } message: {
+            Text("确定要清空所有本地音乐和播放记录吗？此操作无法撤销。")
+        }
         .fileImporter(
             isPresented: $showingFilePicker,
             allowedContentTypes: [.audio],
@@ -71,8 +87,7 @@ struct LocalMusicView: View {
         ) { result in
             switch result {
             case .success(let urls):
-                LocalMusicManager.shared.addMusicFiles(urls)
-                refreshMusicList()
+                viewModel.addMusicFiles(urls)
             case .failure(let error):
                 print("文件选择错误: \(error)")
             }
@@ -85,64 +100,24 @@ struct LocalMusicView: View {
             switch result {
             case .success(let urls):
                 if let folderURL = urls.first {
-                    LocalMusicManager.shared.addMusicFolder(folderURL)
-                    refreshMusicList()
+                    viewModel.addMusicFolder(folderURL)
                 }
             case .failure(let error):
                 print("文件夹选择错误: \(error)")
             }
         }
         .onAppear {
-            refreshMusicList()
-        }
-    }
-    
-    private func refreshMusicList() {
-        musicFolders = LocalMusicManager.shared.getMusicByFolders()
-    }
-    
-    private func playMusic(_ musicFile: MusicFile) {
-        if let url = LocalMusicManager.shared.getAccessibleURL(for: musicFile) {
-            let song = Song(
-                title: musicFile.title,
-                artist: musicFile.artist,
-                duration: musicFile.duration,
-                url: url
-            )
-            playerViewModel.playSong(song)
+            viewModel.refreshMusicList()
         }
     }
 }
 
-struct LocalMusicItemView: View {
-    let musicFile: MusicFile
-    let action: () -> Void
-    
-    var body: some View {
-        Button(action: action) {
-            HStack {
-                Image(systemName: "music.note")
-                    .foregroundColor(.accentColor)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(musicFile.title)
-                        .lineLimit(1)
-                    Text(musicFile.artist)
-                        .font(.caption)
-                        .foregroundColor(.gray)
-                        .lineLimit(1)
-                }
-                Spacer()
-                Text(formatDuration(musicFile.duration))
-                    .font(.caption)
-                    .foregroundColor(.gray)
-            }
-            .padding(.vertical, 8)
-        }
-    }
-    
-    private func formatDuration(_ duration: TimeInterval) -> String {
-        let minutes = Int(duration) / 60
-        let seconds = Int(duration) % 60
-        return String(format: "%d:%02d", minutes, seconds)
+#Preview {
+    NavigationView {
+        LocalMusicView(
+            playerViewModel: PlayerViewModel(),
+            selectedTab: .constant(0)
+        )
     }
 }
+
