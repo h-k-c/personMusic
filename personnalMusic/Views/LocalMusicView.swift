@@ -15,6 +15,8 @@ struct LocalMusicView: View {
     @State private var showingFolderPicker = false
     @State private var showingActionSheet = false
     @State private var showClearConfirmation = false
+    @State private var fileToDelete: MusicFile?
+    @State private var fileForInfo: MusicFile?
     @Binding var selectedTab: Int
     
     var body: some View {
@@ -42,8 +44,21 @@ struct LocalMusicView: View {
                     ForEach(viewModel.musicFolders) { folder in
                         Section(header: Text(folder.path)) {
                             ForEach(folder.files) { file in
-                                LocalMusicItemView(musicFile: file) {
-                                    viewModel.playMusic(file, playerViewModel: playerViewModel, selectedTab: $selectedTab)
+                                LocalMusicItemView(
+                                    musicFile: file,
+                                    action: {
+                                        viewModel.playMusic(file, playerViewModel: playerViewModel, selectedTab: $selectedTab)
+                                    },
+                                    onInfo: {
+                                        fileForInfo = file
+                                    }
+                                )
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    Button(role: .destructive) {
+                                        fileToDelete = file
+                                    } label: {
+                                        Label("删除", systemImage: "trash")
+                                    }
                                 }
                             }
                         }
@@ -120,6 +135,29 @@ struct LocalMusicView: View {
                     },
                     secondaryButton: .cancel(Text("取消"))
                 )
+            }
+            // 删除单个文件确认
+            .alert("确认删除", isPresented: Binding(
+                get: { fileToDelete != nil },
+                set: { if !$0 { fileToDelete = nil } }
+            )) {
+                Button("取消", role: .cancel) { fileToDelete = nil }
+                Button("删除", role: .destructive) {
+                    if let file = fileToDelete {
+                        viewModel.deleteFile(file, playerViewModel: playerViewModel)
+                        fileToDelete = nil
+                    }
+                }
+            } message: {
+                if let file = fileToDelete {
+                    Text("确定要删除「\(file.title)」吗？此操作无法撤销。")
+                } else {
+                    Text("确定要删除这个文件吗？")
+                }
+            }
+            // 文件详情弹窗
+            .sheet(item: $fileForInfo) { file in
+                FileInfoSheet(file: file)
             }
             .onAppear {
                 viewModel.refreshMusicList()

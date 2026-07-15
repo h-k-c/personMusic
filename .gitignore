@@ -1,0 +1,49 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode
+build/
+DerivedData/
+*.xccheckout
+*.xcscmblueprint
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.moved-aside
+*.xcuserstate
+*.xcbkptlist
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# CocoaPods (if used)
+Pods/
+Podfile.lock
+
+# Carthage (if used)
+Carthage/Build/
+
+# IDE
+.idea/
+.vscode/
+
+# Local test music files (do not commit personal audio)
+personnalMusic/music/*.mp3
+personnalMusic/music/*.flac
+personnalMusic/music/*.aac
+personnalMusic/music/*.wav
+personnalMusic/music/*.m4a
+
+# Sensitive / local only
+*.p12
+*.mobileprovision
+*.cer

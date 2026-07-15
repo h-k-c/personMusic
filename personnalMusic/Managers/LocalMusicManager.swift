@@ -20,19 +20,13 @@ struct MusicFile: Codable, Identifiable {
         self.artist = "本地音乐"
         self.duration = 0
         
-        // 创建安全作用域的书签
+        // 安全作用域的书签
         do {
             self.bookmarkData = try url.bookmarkData(
                 options: .minimalBookmark,
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
-            
-            // 同步获取音频时长
-            let asset = AVURLAsset(url: url)
-            let durationItem = asset.duration
-            self.duration = CMTimeGetSeconds(durationItem)
-            
         } catch {
             print("创建书签失败: \(error)")
             self.bookmarkData = nil
@@ -42,7 +36,7 @@ struct MusicFile: Codable, Identifiable {
     // 获取可访问的URL
     func resolveURL() -> URL? {
         guard let bookmarkData = bookmarkData else { return nil }
-        
+
         do {
             var isStale = false
             let resolvedURL = try URL(
@@ -51,12 +45,42 @@ struct MusicFile: Codable, Identifiable {
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             )
-            
+
             return resolvedURL
         } catch {
             print("解析书签失败: \(error)")
             return nil
         }
+    }
+
+    // MARK: - 文件信息
+
+    /// 文件格式（大写扩展名）
+    var fileFormat: String {
+        url.pathExtension.uppercased()
+    }
+
+    /// 文件大小（格式化字符串）
+    var fileSizeString: String {
+        let fileManager = FileManager.default
+        guard let attrs = try? fileManager.attributesOfItem(atPath: url.path),
+              let fileSize = attrs[.size] as? Int64 else {
+            return "未知"
+        }
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: fileSize)
+    }
+
+    /// 文件大小（字节）
+    var fileSize: Int64 {
+        let fileManager = FileManager.default
+        guard let attrs = try? fileManager.attributesOfItem(atPath: url.path),
+              let size = attrs[.size] as? Int64 else {
+            return 0
+        }
+        return size
     }
 }
 
@@ -97,105 +121,116 @@ class LocalMusicManager {
         return musicFiles
     }
     
-    // 添加音乐文件夹
+    // 添加音乐文件夹（在后台队列扫描，不阻塞 UI）
     func addMusicFolder(_ folderURL: URL) {
-        // 开始访问安全作用域的资源
         guard folderURL.startAccessingSecurityScopedResource() else {
             print("无法访问文件夹")
             return
         }
-        defer {
-            folderURL.stopAccessingSecurityScopedResource()
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            defer { folderURL.stopAccessingSecurityScopedResource() }
+            guard let self = self else { return }
+
+            var musicFiles = self.loadMusicFiles()
+            let newFiles = self.scanMusicFiles(in: folderURL)
+
+            let newMusicFiles = newFiles.filter { newFile in
+                !musicFiles.contains { $0.url.path == newFile.url.path }
+            }
+            musicFiles.append(contentsOf: newMusicFiles)
+
+            DispatchQueue.main.async {
+                self.saveMusicFiles(musicFiles)
+                NotificationCenter.default.post(name: .musicFilesDidUpdate, object: nil)
+            }
         }
-        
-        var musicFiles = loadMusicFiles()
-        let newFiles = scanMusicFiles(in: folderURL)
-        
-        // 过滤掉已存在的文件
-        let newMusicFiles = newFiles.filter { newFile in
-            !musicFiles.contains { $0.url.path == newFile.url.path }
-        }
-        
-        musicFiles.append(contentsOf: newMusicFiles)
-        saveMusicFiles(musicFiles)
     }
     
     // 从音频文件加载元数据
-    private func loadMetadata(from url: URL) throws -> (title: String?, artist: String?, duration: TimeInterval) {
+    private func loadMetadata(from url: URL) -> (title: String?, artist: String?, duration: TimeInterval) {
         // 开始访问安全作用域的资源
         guard url.startAccessingSecurityScopedResource() else {
-            throw NSError(domain: "LocalMusicManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "无法访问文件"])
+            return (nil, nil, 0)
         }
         defer {
             url.stopAccessingSecurityScopedResource()
         }
-        
+
         let asset = AVURLAsset(url: url)
-        var title: String?
-        var artist: String?
-        var duration: TimeInterval = 0
-        
-        // 使用信号量来等待异步操作完成
+        var resultTitle: String?
+        var resultArtist: String?
+        var resultDuration: TimeInterval = 0
+
+        // 使用信号量等异步加载完成
         let semaphore = DispatchSemaphore(value: 0)
-        
-        // 加载持续时间
-        asset.loadValuesAsynchronously(forKeys: ["duration"]) {
-            duration = asset.duration.seconds
-            semaphore.signal()
-        }
-        _ = semaphore.wait(timeout: .now() + 2)  // 等待最多2秒
-        
-        // 加载元数据
-        let metadata = asset.metadata
-        for item in metadata {
-            if let commonKey = item.commonKey {
-                switch commonKey.rawValue {
-                case AVMetadataKey.commonKeyTitle.rawValue:
-                    title = item.stringValue
-                case AVMetadataKey.commonKeyArtist.rawValue:
-                    artist = item.stringValue
-                default:
-                    break
+
+        // 同时加载持续时间和元数据
+        asset.loadValuesAsynchronously(forKeys: ["duration", "commonMetadata"]) {
+            // 加载时长
+            var error: NSError?
+            if asset.statusOfValue(forKey: "duration", error: &error) == .loaded {
+                let duration = asset.duration
+                resultDuration = duration.seconds.isNaN ? 0 : duration.seconds
+            }
+
+            // 加载元数据（commonMetadata 加载完成后可用）
+            let metadata = asset.commonMetadata
+            for item in metadata {
+                if let commonKey = item.commonKey {
+                    switch commonKey.rawValue {
+                    case AVMetadataKey.commonKeyTitle.rawValue:
+                        resultTitle = item.stringValue
+                    case AVMetadataKey.commonKeyArtist.rawValue:
+                        resultArtist = item.stringValue
+                    default:
+                        break
+                    }
                 }
             }
+
+            semaphore.signal()
         }
-        
-        return (title, artist, duration)
+
+        _ = semaphore.wait(timeout: .now() + 5)  // 等待最多5秒
+        return (resultTitle, resultArtist, resultDuration)
+    }
+
+    // 加载单个音乐文件元数据并返回更新后的 MusicFile（用于 addMusicFiles 路径）
+    private func loadMetadataForFile(_ url: URL) -> MusicFile {
+        var musicFile = MusicFile(url: url)
+        let metadata = loadMetadata(from: url)
+        musicFile.title = metadata.title ?? musicFile.title
+        musicFile.artist = metadata.artist ?? musicFile.artist
+        musicFile.duration = metadata.duration
+        return musicFile
     }
     
     // 扫描文件夹中的音乐文件
     private func scanMusicFiles(in folderURL: URL) -> [MusicFile] {
         let fileManager = FileManager.default
         var musicFiles: [MusicFile] = []
-        
+
         guard let enumerator = fileManager.enumerator(
             at: folderURL,
             includingPropertiesForKeys: [.isRegularFileKey],
             options: [.skipsHiddenFiles]
         ) else { return [] }
-        
+
         for case let fileURL as URL in enumerator {
             guard let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
                   let isRegularFile = resourceValues.isRegularFile,
                   isRegularFile else {
                 continue
             }
-            
+
             let fileExtension = fileURL.pathExtension.lowercased()
             if ["mp3", "wav", "m4a", "aac"].contains(fileExtension) {
-                var musicFile = MusicFile(url: fileURL)
-                
-                // 尝试读取音频文件的元数据
-                if let metadata = try? loadMetadata(from: fileURL) {
-                    musicFile.title = metadata.title ?? musicFile.title
-                    musicFile.artist = metadata.artist ?? musicFile.artist
-                    musicFile.duration = metadata.duration
-                }
-                
+                let musicFile = loadMetadataForFile(fileURL)
                 musicFiles.append(musicFile)
             }
         }
-        
+
         return musicFiles
     }
     
@@ -205,14 +240,14 @@ class LocalMusicManager {
         let newFiles = urls.compactMap { url -> MusicFile? in
             guard url.startAccessingSecurityScopedResource() else { return nil }
             defer { url.stopAccessingSecurityScopedResource() }
-            return MusicFile(url: url)
+            return loadMetadataForFile(url)
         }
-        
+
         // 过滤掉已存在的文件
         let newMusicFiles = newFiles.filter { newFile in
             !musicFiles.contains { $0.url.path == newFile.url.path }
         }
-        
+
         musicFiles.append(contentsOf: newMusicFiles)
         saveMusicFiles(musicFiles)
     }
@@ -301,9 +336,13 @@ class LocalMusicManager {
         guard let lastPlayedID = userDefaults.string(forKey: "lastPlayedSongID") else {
             return nil
         }
-        
+
         return loadMusicFiles().first { $0.id == lastPlayedID }
     }
 }
 
-
+// MARK: - 通知
+extension Notification.Name {
+    /// 音乐文件列表更新通知（用于后台扫描完成后刷新 UI）
+    static let musicFilesDidUpdate = Notification.Name("musicFilesDidUpdate")
+}

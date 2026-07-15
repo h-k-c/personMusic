@@ -9,6 +9,26 @@ import SwiftUI
 
 class LocalMusicViewModel: ObservableObject {
     @Published var musicFolders: [MusicFolder] = []
+
+    init() {
+        // 监听后台扫描完成通知
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMusicFilesUpdate),
+            name: .musicFilesDidUpdate,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func handleMusicFilesUpdate() {
+        DispatchQueue.main.async { [weak self] in
+            self?.refreshMusicList()
+        }
+    }
     
     // 刷新音乐列表
     func refreshMusicList() {
@@ -48,6 +68,16 @@ class LocalMusicViewModel: ObservableObject {
         }
     }
     
+    // 删除单个文件
+    func deleteFile(_ file: MusicFile, playerViewModel: PlayerViewModel) {
+        // 如果正在播放该文件，先停止
+        if playerViewModel.currentSong?.url?.path == file.url.path {
+            playerViewModel.clearPlayback()
+        }
+        LocalMusicManager.shared.removeMusicFile(file)
+        refreshMusicList()
+    }
+
     // 清空所有音乐
     func clearAllMusic(playerViewModel: PlayerViewModel) {
         // 清空本地音乐列表

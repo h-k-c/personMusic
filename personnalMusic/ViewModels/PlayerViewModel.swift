@@ -75,16 +75,8 @@ class PlayerViewModel: ObservableObject {
     
     // MARK: - 初始化方法
     init() {
-        self.isPlaying = false
-        self.progress = 0.0
-        self.currentTime = 0
-        self.duration = 30.0
-        self.playlist = []
         setupAudioSession()
         setupRemoteCommandCenter()
-        
-        // 恢复上次播放状态
-        restoreLastPlayback()
     }
     
     /// 设置音频会话
@@ -95,6 +87,36 @@ class PlayerViewModel: ObservableObject {
             try AVAudioSession.sharedInstance().setActive(true)
         } catch {
             print("设置音频会话失败: \(error)")
+        }
+
+        // 处理音频中断（来电、闹钟等）
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleInterruption),
+            name: AVAudioSession.interruptionNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleInterruption(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+
+        switch type {
+        case .began:
+            pause()
+        case .ended:
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                if options.contains(.shouldResume) {
+                    play()
+                }
+            }
+        @unknown default:
+            break
         }
     }
     
@@ -154,18 +176,20 @@ class PlayerViewModel: ObservableObject {
             }
             return
         }
-        
+
         guard let currentIndex = getCurrentIndex() else {
             if let lastSong = playlist.last {
                 playSong(lastSong)
             }
             return
         }
-        
-        // 如果不是第一首歌，才播放上一首
+
         if currentIndex > 0 {
             let previousSong = playlist[currentIndex - 1]
             playSong(previousSong)
+        } else if repeatMode == .all, let lastSong = playlist.last {
+            // 列表循环：第一首切换到最后一首
+            playSong(lastSong)
         }
     }
     
@@ -186,10 +210,12 @@ class PlayerViewModel: ObservableObject {
             return
         }
         
-        // 如果不是最后一首歌，才播放下一首
         if currentIndex < playlist.count - 1 {
             let nextSong = playlist[currentIndex + 1]
             playSong(nextSong)
+        } else if repeatMode == .all, let firstSong = playlist.first {
+            // 列表循环：最后一首切换到第一首
+            playSong(firstSong)
         }
     }
     
@@ -260,30 +286,58 @@ class PlayerViewModel: ObservableObject {
         }
     }
     
+    // MARK: - 每文件进度记忆
+    private let perFileProgressKey = "perFileProgress"
+
+    /// 获取指定文件的上次播放进度
+    func getSavedProgress(for url: URL) -> TimeInterval {
+        let dict = UserDefaults.standard.dictionary(forKey: perFileProgressKey) as? [String: TimeInterval] ?? [:]
+        return dict[url.path] ?? 0
+    }
+
+    /// 保存指定文件的播放进度
+    private func saveFileProgress(_ time: TimeInterval, for url: URL) {
+        var dict = UserDefaults.standard.dictionary(forKey: perFileProgressKey) as? [String: TimeInterval] ?? [:]
+        // 如果已经播完（剩余不足2秒），重置进度到开头
+        if duration > 2 && time >= duration - 2 {
+            dict[url.path] = 0
+        } else {
+            dict[url.path] = time
+        }
+        UserDefaults.standard.set(dict, forKey: perFileProgressKey)
+    }
+
     // MARK: - 播放歌曲
     /// 播放指定的歌曲
     /// - Parameter song: 要播放的歌曲
     func playSong(_ song: Song) {
         guard let url = song.url else { return }
-        
+
         // 验证URL是否可访问
         guard FileManager.default.fileExists(atPath: url.path) else { return }
-        
+
         // 设置当前歌曲
         currentSong = song
-        
+
         // 创建新的播放器项
         let playerItem = AVPlayerItem(url: url)
-        
+
         // 移除旧的观察者
         removeTimeObserver()
         NotificationCenter.default.removeObserver(self, name: .AVPlayerItemDidPlayToEndTime, object: nil)
-        
+
         // 创建新的播放器
         player = AVPlayer(playerItem: playerItem)
         player?.volume = Float(volume)
         player?.rate = Float(playbackRate.rawValue)
-        
+
+        // 恢复该文件的上次播放进度
+        let savedProgress = getSavedProgress(for: url)
+        if savedProgress > 0 {
+            let seekTime = CMTime(seconds: savedProgress, preferredTimescale: 1000)
+            player?.seek(to: seekTime)
+        }
+
         // 设置新的观察者
         setupTimeObserver()
         NotificationCenter.default.addObserver(
@@ -292,10 +346,10 @@ class PlayerViewModel: ObservableObject {
             name: .AVPlayerItemDidPlayToEndTime,
             object: playerItem
         )
-        
+
         // 保存播放状态
         savePlaybackState()
-        
+
         // 开始播放
         play()
     }
@@ -433,19 +487,24 @@ class PlayerViewModel: ObservableObject {
     private func setupTimeObserver() {
         // 每0.5秒更新一次进度
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-        
+
         timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             guard let self = self,
                   let duration = self.player?.currentItem?.duration,
                   !duration.seconds.isNaN else { return }
-            
+
             self.currentTime = time.seconds
             self.duration = duration.seconds
             self.progress = Float(self.currentTime / self.duration)
-            
+
             // 保存当前状态
             self.savePlaybackState()
-            
+
+            // 保存每文件进度
+            if let url = self.currentSong?.url {
+                self.saveFileProgress(time.seconds, for: url)
+            }
+
             // 更新锁屏信息
             self.updateNowPlaying()
         }
@@ -459,7 +518,30 @@ class PlayerViewModel: ObservableObject {
     }
     
     @objc private func playerItemDidFinish() {
-        nextTrack()
+        switch repeatMode {
+        case .one:
+            // 单曲循环：重新播放当前歌曲
+            guard let player = player else { return }
+            player.seek(to: .zero)
+            play()
+        case .all:
+            // 列表循环：播下一首，最后一首回到第一首
+            guard let currentIndex = getCurrentIndex() else {
+                if let firstSong = playlist.first { playSong(firstSong) }
+                return
+            }
+            if currentIndex < playlist.count - 1 {
+                playSong(playlist[currentIndex + 1])
+            } else if let firstSong = playlist.first {
+                playSong(firstSong)
+            }
+        case .none:
+            // 不循环：播下一首，最后一首就停止
+            guard let currentIndex = getCurrentIndex() else { return }
+            if currentIndex < playlist.count - 1 {
+                playSong(playlist[currentIndex + 1])
+            }
+        }
     }
     
     // MARK: - 锁屏控制
@@ -509,6 +591,9 @@ class PlayerViewModel: ObservableObject {
     
     // MARK: - 恢复上次播放
     func restoreLastPlayback() {
+        // 确保清理旧的 observer，防止重复调用时泄漏
+        removeTimeObserver()
+
         // 先加载所有音乐文件到播放列表
         let allFiles = LocalMusicManager.shared.getAllMusicFiles()
         
@@ -564,8 +649,11 @@ class PlayerViewModel: ObservableObject {
             // 设置当前歌曲但不自动播放
             currentSong = song
             
-            // 恢复上次的播放进度和时长
-            if let lastTime = UserDefaults.standard.object(forKey: "lastPlaybackTime") as? TimeInterval {
+            // 恢复进度：优先使用每文件记忆的进度
+            let perFileProgress = getSavedProgress(for: url)
+            if perFileProgress > 0 {
+                currentTime = perFileProgress
+            } else if let lastTime = UserDefaults.standard.object(forKey: "lastPlaybackTime") as? TimeInterval {
                 currentTime = lastTime
             }
             
