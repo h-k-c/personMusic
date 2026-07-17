@@ -62,16 +62,12 @@ struct LocalMusicItemView: View {
                 // 收藏按钮（自带状态 + 弹跳动效）
                 FavoriteButton(fileId: musicFile.id, isFavorite: musicFile.isFavorite, onToggle: favToggle)
 
-                // 信息按钮
+                // 信息按钮（非 Button，避免嵌套手势冲突）
                 if let onInfo = onInfo {
-                    Button {
-                        onInfo()
-                    } label: {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 16))
-                            .foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 16))
+                        .foregroundColor(.secondary)
+                        .onTapGesture { onInfo() }
                 }
             }
             .padding(.vertical, 5)

@@ -13,17 +13,15 @@ struct FavoriteButton: View {
     }
 
     var body: some View {
-        Button {
-            isFav.toggle()
-            trigger.toggle()
-            LocalMusicManager.shared.toggleFavorite(fileId)
-            onToggle?()
-        } label: {
-            Image(systemName: isFav ? "heart.fill" : "heart")
-                .font(.system(size: 16))
-                .foregroundColor(isFav ? .red : .secondary)
-                .symbolEffect(.bounce, value: trigger)
-        }
-        .buttonStyle(.plain)
+        Image(systemName: isFav ? "heart.fill" : "heart")
+            .font(.system(size: 16))
+            .foregroundColor(isFav ? .red : .secondary)
+            .symbolEffect(.bounce, value: trigger)
+            .onTapGesture {
+                isFav.toggle()
+                trigger.toggle()
+                LocalMusicManager.shared.toggleFavorite(fileId)
+                onToggle?()
+            }
     }
 }
