@@ -42,8 +42,7 @@ struct PlayerViewModelTests {
         #expect(vm.isPlaying == false)
         #expect(vm.currentSong == nil)
         #expect(vm.playlist.isEmpty)
-        #expect(vm.repeatMode == .none)
-        #expect(vm.isShuffleEnabled == false)
+        #expect(vm.playMode == .sequential)
         #expect(vm.playbackRate == .normal)
     }
 
@@ -63,8 +62,8 @@ struct PlayerViewModelTests {
 
     @Test func playModeStartsSequential() {
         #expect(vm.playMode == .sequential)
-        #expect(vm.isShuffleEnabled == false)
-        #expect(vm.repeatMode == .none)
+        vm.togglePlayMode(); #expect(vm.playMode == .shuffle)
+        vm.togglePlayMode(); #expect(vm.playMode == .sequential)
     }
 
     @Test func playbackRate() {

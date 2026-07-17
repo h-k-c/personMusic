@@ -22,9 +22,9 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
     @Published var duration: TimeInterval = 30.0
     @Published var progress: Float = 0.0
     @Published var volume: Double = 0.5
-    @Published var isShuffleEnabled = false
-    @Published var repeatMode: RepeatMode = .none
     @Published var playMode: PlayMode = .sequential
+    private var repeatMode: RepeatMode = .none
+    private var isShuffleEnabled = false
     @Published var playbackRate: PlaybackRate = .normal
     // MARK: - 私有属性
     private var player: AVAudioPlayer?
@@ -409,26 +409,6 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
         guard !originalPlaylist.isEmpty else { return }
         shuffledPlaylist = playlist.shuffled()
         playlist = shuffledPlaylist
-    }
-
-    // MARK: - 旧方法兼容（内部保留）
-    private func toggleShuffle() {
-        isShuffleEnabled.toggle()
-        if isShuffleEnabled {
-            originalPlaylist = playlist
-            shuffledPlaylist = playlist.shuffled()
-            playlist = shuffledPlaylist
-        } else {
-            playlist = originalPlaylist
-        }
-    }
-
-    private func toggleRepeatMode() {
-        switch repeatMode {
-        case .none: repeatMode = .all
-        case .all:  repeatMode = .one
-        case .one:  repeatMode = .none
-        }
     }
 
     // MARK: - Timer

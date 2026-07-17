@@ -1,56 +1,5 @@
 import SwiftUI
 
-// 播放列表项视图
-struct PlaylistItemView: View {
-    let song: Song
-    let isPlaying: Bool
-    let isSelected: Bool
-    let onTap: () -> Void
-    
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                // 播放状态图标
-                ZStack {
-                    Circle()
-                        .fill(isSelected ? Color.black.opacity(0.1) : Color.clear)
-                        .frame(width: 40, height: 40)
-                    
-                    if isPlaying {
-                        Image(systemName: "play.fill")
-                            .foregroundColor(.black)
-                    } else {
-                        Image(systemName: "music.note")
-                            .foregroundColor(isSelected ? .black : .gray)
-                    }
-                }
-                
-                // 歌曲信息
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(song.title)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.primary)
-                    Text(song.artist)
-                        .font(.system(size: 14))
-                        .foregroundColor(.gray)
-                }
-                
-                Spacer()
-                
-                // 歌曲时长
-                Text(song.duration.formattedDuration)
-                    .font(.system(size: 14))
-                    .foregroundColor(.gray)
-            }
-            .padding(.vertical, 8)
-        }
-    }
-}
-
-#Preview {
-    ContentView()
-}
-
 // MARK: - 播放列表弹窗视图
 struct PlaylistOverlayView: View {
     @Binding var showPlaylist: Bool
