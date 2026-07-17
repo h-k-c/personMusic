@@ -10,6 +10,7 @@ struct LocalMusicItemView: View {
     let musicFile: MusicFile
     let action: () -> Void
     let onInfo: (() -> Void)?
+    @State private var isHighlighted = false
 
     init(musicFile: MusicFile,
          action: @escaping () -> Void,
@@ -20,54 +21,63 @@ struct LocalMusicItemView: View {
     }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 14) {
-                // 音乐图标
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(Color.accentColor.opacity(0.12))
-                        .frame(width: 46, height: 46)
-                    Image(systemName: "music.note")
-                        .font(.system(size: 20))
-                        .foregroundColor(.accentColor)
-                }
+        HStack(spacing: 14) {
+            // 音乐图标
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 46, height: 46)
+                Image(systemName: "music.note")
+                    .font(.system(size: 20))
+                    .foregroundColor(.accentColor)
+            }
 
-                // 标题和艺术家
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(musicFile.title)
+            // 标题和艺术家
+            VStack(alignment: .leading, spacing: 3) {
+                Text(musicFile.title)
+                    .lineLimit(1)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(.primary)
+                HStack(spacing: 6) {
+                    Text(musicFile.artist)
                         .lineLimit(1)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundColor(.primary)
-                    HStack(spacing: 6) {
-                        Text(musicFile.artist)
-                            .lineLimit(1)
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                    if musicFile.duration > 0 {
+                        Text("·")
+                            .foregroundColor(.secondary)
+                        Text(musicFile.duration.formattedDuration)
                             .font(.system(size: 13))
                             .foregroundColor(.secondary)
-                        if musicFile.duration > 0 {
-                            Text("·")
-                                .foregroundColor(.secondary)
-                            Text(musicFile.duration.formattedDuration)
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                                .monospacedDigit()
-                        }
+                            .monospacedDigit()
                     }
                 }
-
-                Spacer()
-
-                // 信息按钮
-                if let onInfo = onInfo {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 16))
-                        .foregroundColor(.secondary)
-                        .onTapGesture { onInfo() }
-                }
             }
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
+
+            Spacer()
+
+            // 信息按钮
+            if let onInfo = onInfo {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 16))
+                    .foregroundColor(.secondary)
+                    .onTapGesture { onInfo() }
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isHighlighted ? Color.accentColor.opacity(0.1) : Color.clear)
+        )
+        .scaleEffect(isHighlighted ? 0.975 : 1.0)
+        .onTapGesture {
+            withAnimation(.spring(response: 0.18, dampingFraction: 0.7)) { isHighlighted = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { action() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) { isHighlighted = false }
+            }
+        }
     }
 }
 

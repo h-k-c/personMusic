@@ -57,9 +57,6 @@ class LocalMusicViewModel: ObservableObject {
             : (LocalMusicManager.shared.getAllMusicFiles().filter { $0.folderIdentifier == file.folderIdentifier })
         playerViewModel.setPlaylist(from: contextFiles)
         playerViewModel.playSong(song)
-
-        // 跳转到播放界面
-        selectedTab.wrappedValue = 0
     }
     
     // 删除单个文件

@@ -54,6 +54,15 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
             case .shuffle:    return "shuffle"
             }
         }
+
+        var label: String {
+            switch self {
+            case .sequential: return "顺序"
+            case .repeatAll:  return "列表循环"
+            case .repeatOne:  return "单曲循环"
+            case .shuffle:    return "随机"
+            }
+        }
     }
 
     enum PlaybackRate: Double, CaseIterable, Identifiable {
@@ -172,12 +181,12 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
     }
 
     // MARK: - 播放控制
+
     func togglePlayPause() {
         isPlaying ? pause() : play()
     }
 
     func play() {
-        try? AVAudioSession.sharedInstance().setActive(true)
         player?.play()
         isPlaying = true
         startTimer()
@@ -247,8 +256,14 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
         guard let url = resolvedURL else { return }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 
-        // 确保当前歌曲在播放列表中
-        if getCurrentIndex() == nil {
+        // 确保当前歌曲在播放列表中（防止重复）
+        let alreadyInPlaylist: Bool
+        if let fid = song.folderIdentifier, let rp = song.relativePath {
+            alreadyInPlaylist = playlist.contains(where: { $0.folderIdentifier == fid && $0.relativePath == rp })
+        } else {
+            alreadyInPlaylist = playlist.contains(where: { $0.title == song.title && $0.artist == song.artist })
+        }
+        if !alreadyInPlaylist {
             playlist.append(song)
         }
 
@@ -606,7 +621,6 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
         stop()
         currentSong = nil
         playlist = []
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
     }
 

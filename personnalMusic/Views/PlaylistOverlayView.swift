@@ -1,42 +1,25 @@
 import SwiftUI
 
-// MARK: - 播放列表弹窗视图
+// MARK: - 播放列表弹窗视图（当前上下文平铺列表）
 struct PlaylistOverlayView: View {
     @Binding var showPlaylist: Bool
     @ObservedObject var playerViewModel: PlayerViewModel
-    @State private var showClearConfirmation = false
+    /// 从当前播放歌曲开始的播放列表（当前 → 后续 → 之前的）
+    private var orderedPlaylist: [Song] {
+        guard let current = playerViewModel.currentSong,
+              let idx = playerViewModel.playlist.firstIndex(where: {
+                  $0.folderIdentifier == current.folderIdentifier && $0.relativePath == current.relativePath
+              }) else {
+            return playerViewModel.playlist
+        }
+        return Array(playerViewModel.playlist[idx...] + playerViewModel.playlist[..<idx])
+    }
 
     var body: some View {
         NavigationView {
             List {
-                let folders = LocalMusicManager.shared.getMusicByFolders()
-                let looseFiles = LocalMusicManager.shared.getAllMusicFiles().filter { $0.folderIdentifier == "loose" }
-
-                // 文件夹分组
-                ForEach(folders) { folder in
-                    Section {
-                        ForEach(folder.files) { file in
-                            playlistRow(file)
-                        }
-                    } header: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "folder.fill")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                            Text(folder.path)
-                                .font(.system(size: 13))
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-
-                // 零散文件
-                if !looseFiles.isEmpty {
-                    Section("文件") {
-                        ForEach(looseFiles) { file in
-                            playlistRow(file)
-                        }
-                    }
+                ForEach(orderedPlaylist) { song in
+                    playlistRow(song)
                 }
             }
             .listStyle(.insetGrouped)
@@ -45,7 +28,8 @@ struct PlaylistOverlayView: View {
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button(role: .destructive) {
-                        showClearConfirmation = true
+                        playerViewModel.clearPlayback()
+                        showPlaylist = false
                     } label: {
                         Image(systemName: "trash")
                     }
@@ -56,60 +40,51 @@ struct PlaylistOverlayView: View {
                     }
                 }
             }
-            .alert("确认清空", isPresented: $showClearConfirmation) {
-                Button("取消", role: .cancel) {}
-                Button("清空", role: .destructive) { clearAllMusic() }
-            } message: {
-                Text("确定要清空所有音乐吗？此操作无法撤销。")
-            }
         }
     }
 
-    private func playlistRow(_ file: MusicFile) -> some View {
-        Button(action: { playMusicFile(file) }) {
+    private func playlistRow(_ song: Song) -> some View {
+        Button(action: { playSong(song) }) {
             HStack(spacing: 12) {
-                Image(systemName: isCurrentFile(file) ? "speaker.wave.2.fill" : "music.note")
+                Image(systemName: isCurrentSong(song) ? "speaker.wave.2.fill" : "music.note")
                     .font(.system(size: 16))
-                    .foregroundColor(isCurrentFile(file) ? .accentColor : .secondary)
+                    .foregroundColor(isCurrentSong(song) ? .accentColor : .secondary)
                     .frame(width: 24)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(file.title).lineLimit(1).font(.system(size: 16)).foregroundColor(.primary)
-                    Text(file.artist).font(.system(size: 13)).foregroundColor(.secondary).lineLimit(1)
+                    Text(song.title).lineLimit(1).font(.system(size: 16)).foregroundColor(.primary)
+                    Text(song.artist).font(.system(size: 13)).foregroundColor(.secondary).lineLimit(1)
                 }
                 Spacer()
-                Text(file.duration.formattedDuration).font(.system(size: 14)).foregroundColor(.secondary).monospacedDigit()
+                Text(song.duration.formattedDuration)
+                    .font(.system(size: 14))
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
             }
             .padding(.vertical, 4)
         }
-        .id(file.id)
+        .id(song.id)
     }
 
-    private func isCurrentFile(_ file: MusicFile) -> Bool {
-        guard let song = playerViewModel.currentSong else { return false }
-        return song.folderIdentifier == file.folderIdentifier && song.relativePath == file.relativePath
+    private func isCurrentSong(_ song: Song) -> Bool {
+        guard let current = playerViewModel.currentSong else { return false }
+        return current.folderIdentifier == song.folderIdentifier && current.relativePath == song.relativePath
     }
 
-    private func playMusicFile(_ file: MusicFile) {
-        guard let result = LocalMusicManager.shared.resolveFileURL(for: file) else { return }
-        // 全部歌曲作为播放列表上下文
-        playerViewModel.setPlaylist(from: LocalMusicManager.shared.getAllMusicFiles())
-        let song = Song(
-            title: file.title,
-            artist: file.artist,
-            duration: file.duration,
-            url: result.url,
-            securityScopedRootURL: result.rootURL,
-            folderPath: file.folderPath,
-            folderIdentifier: file.folderIdentifier,
-            relativePath: file.relativePath
-        )
-        playerViewModel.playSong(song)
+    private func playSong(_ song: Song) {
+        // 解析 URL（如果歌曲来自播放列表，url 可能为 nil）
+        var resolvedSong = song
+        if resolvedSong.url == nil,
+           let folderId = song.folderIdentifier,
+           let relativePath = song.relativePath,
+           let result = LocalMusicManager.shared.resolveFileURL(folderIdentifier: folderId, relativePath: relativePath) {
+            resolvedSong = Song(
+                title: song.title, artist: song.artist, duration: song.duration,
+                url: result.url, securityScopedRootURL: result.rootURL,
+                folderPath: song.folderPath, folderIdentifier: folderId, relativePath: relativePath
+            )
+        }
+        playerViewModel.playSong(resolvedSong)
         showPlaylist = false
     }
 
-    private func clearAllMusic() {
-        playerViewModel.clearPlayback()
-        LocalMusicManager.shared.clearAllMusic()
-        showPlaylist = false
-    }
 }

@@ -103,6 +103,13 @@ class LocalMusicManager {
 
     /// 通过文件夹标识和相对路径直接解析文件 URL
     func resolveFileURL(folderIdentifier: String, relativePath: String) -> (url: URL, rootURL: URL)? {
+        // 零散文件：通过文件名匹配，使用文件级书签
+        if folderIdentifier == "loose" {
+            let looseFiles = getAllMusicFiles().filter { $0.folderIdentifier == "loose" }
+            guard let file = looseFiles.first(where: { $0.relativePath == relativePath }) else { return nil }
+            return resolveFileURL(for: file)
+        }
+        // 文件夹导入：用文件夹级书签
         guard let rootURL = resolveBookmark(for: folderIdentifier) else { return nil }
         let fileURL = rootURL.appendingPathComponent(relativePath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {

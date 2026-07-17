@@ -5,6 +5,7 @@ import AVFoundation
 struct PlayerContentView: View {
     @ObservedObject var playerViewModel: PlayerViewModel
     @Binding var selectedTab: Int
+    @Environment(\.colorScheme) private var colorScheme
     @State private var showPlaylist = false
 
     var body: some View {
@@ -63,8 +64,7 @@ struct PlayerContentView: View {
                 .foregroundColor(.white)
                 .padding(.horizontal, 40)
                 .padding(.vertical, 14)
-                .background(Color.accentColor)
-                .cornerRadius(12)
+                .background(.blue, in: RoundedRectangle(cornerRadius: 12))
             }
 
             Spacer()
@@ -133,7 +133,7 @@ struct PlayerContentView: View {
                 }
                 .padding(.vertical, 8)
                 .padding(.horizontal, 20)
-                .background(Color.black.opacity(0.1))
+                .background(Color.primary.opacity(0.1))
                 .cornerRadius(20)
             }
             .padding(.top, 40)

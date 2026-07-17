@@ -34,8 +34,10 @@ struct ContentView: View {
         }
         .accentColor(.primary)
         .onAppear {
-            // 激活音频会话（后台播放必须）
-            try? AVAudioSession.sharedInstance().setActive(true)
+            // 激活音频会话（后台播放必须），用 detached 脱离主线程避免警告
+            Task.detached {
+                try? await AVAudioSession.sharedInstance().setActive(true)
+            }
             // 恢复上次播放
             playerViewModel.restoreLastPlayback()
         }

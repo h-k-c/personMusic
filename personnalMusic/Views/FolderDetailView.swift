@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 struct FolderDetailView: View {
     let folder: MusicFolder
     let parentPath: String  // 累积路径，如 "" 或 "subdir/" 或 "subdir/deeper/"
-    @ObservedObject var playerViewModel: PlayerViewModel
+    var playerViewModel: PlayerViewModel  // 不观察，避免播放进度刷新阻断导航点击
     @Binding var selectedTab: Int
     @Binding var fileToDelete: MusicFile?
     @Binding var fileForInfo: MusicFile?
@@ -89,7 +89,6 @@ struct FolderDetailView: View {
                         folderPath: file.folderPath, folderIdentifier: file.folderIdentifier,
                         relativePath: file.relativePath)
         playerViewModel.playSong(song)
-        selectedTab = 0
     }
 }
 

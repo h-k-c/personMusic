@@ -9,11 +9,10 @@ import UniformTypeIdentifiers
 import AVFoundation
 
 struct LocalMusicView: View {
-    @ObservedObject var playerViewModel: PlayerViewModel
+    var playerViewModel: PlayerViewModel  // 不观察，避免播放进度刷新阻断导航点击
     @StateObject private var viewModel = LocalMusicViewModel()
     @State private var showingFilePicker = false
     @State private var showingFolderPicker = false
-    @State private var showingActionSheet = false
     @State private var showClearConfirmation = false
     @State private var fileToDelete: MusicFile?
     @State private var fileForInfo: MusicFile?
@@ -32,11 +31,6 @@ struct LocalMusicView: View {
             .listStyle(.insetGrouped)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
-            .confirmationDialog("添加音乐", isPresented: $showingActionSheet) {
-                Button("添加文件夹") { showingFolderPicker = true }
-                Button("添加文件") { showingFilePicker = true }
-                Button("取消", role: .cancel) {}
-            }
             .sheet(isPresented: $showingFilePicker) {
                 DocumentPicker(allowedContentTypes: [.audio], allowsMultipleSelection: true) { viewModel.addMusicFiles($0) }
             }
@@ -123,7 +117,18 @@ struct LocalMusicView: View {
     @ToolbarContentBuilder
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .principal) { Text("本地音乐").font(.system(size: 18, weight: .semibold)) }
-        ToolbarItem(placement: .navigationBarLeading) { Button(action: { showingActionSheet = true }) { Image(systemName: "plus").imageScale(.large) } }
+        ToolbarItem(placement: .navigationBarLeading) {
+            Menu {
+                Button(action: { showingFolderPicker = true }) {
+                    Label("添加文件夹", systemImage: "folder.badge.plus")
+                }
+                Button(action: { showingFilePicker = true }) {
+                    Label("添加文件", systemImage: "doc.badge.plus")
+                }
+            } label: {
+                Image(systemName: "plus").imageScale(.large)
+            }
+        }
         ToolbarItem(placement: .navigationBarTrailing) { Button(action: { showClearConfirmation = true }) { Image(systemName: "trash").foregroundColor(.red).imageScale(.large) } }
     }
 
@@ -132,11 +137,19 @@ struct LocalMusicView: View {
             Image(systemName: "music.note.list")
                 .font(.system(size: 50)).foregroundColor(.gray)
             Text("还没有添加本地音乐").foregroundColor(.gray)
-            Button(action: { showingActionSheet = true }) {
+            Menu {
+                Button(action: { showingFolderPicker = true }) {
+                    Label("添加文件夹", systemImage: "folder.badge.plus")
+                }
+                Button(action: { showingFilePicker = true }) {
+                    Label("添加文件", systemImage: "doc.badge.plus")
+                }
+            } label: {
                 Text("添加音乐")
+                    .font(.headline)
+                    .foregroundColor(.white)
                     .padding(.horizontal, 20).padding(.vertical, 10)
-                    .background(Color.accentColor).foregroundColor(.white)
-                    .cornerRadius(8)
+                    .background(.blue, in: RoundedRectangle(cornerRadius: 8))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
