@@ -17,7 +17,6 @@ struct LocalMusicView: View {
     @State private var showClearConfirmation = false
     @State private var fileToDelete: MusicFile?
     @State private var fileForInfo: MusicFile?
-    @State private var folderToDelete: MusicFolder?
     @Binding var selectedTab: Int
 
     var body: some View {
@@ -54,14 +53,6 @@ struct LocalMusicView: View {
                 Button("取消", role: .cancel) { fileToDelete = nil }
                 Button("删除", role: .destructive) { deleteCurrentFile() }
             } message: { Text(fileToDelete.map { "确定要删除「\($0.title)」吗？" } ?? "") }
-            .alert("删除文件夹", isPresented: Binding(get: { folderToDelete != nil }, set: { if !$0 { folderToDelete = nil } })) {
-                Button("取消", role: .cancel) { folderToDelete = nil }
-                Button("删除", role: .destructive) { deleteCurrentFolder() }
-            } message: {
-                if let f = folderToDelete {
-                    Text("确定要删除「\(f.path)」及其全部 \(f.files.count) 首歌曲吗？")
-                }
-            }
             .sheet(item: $fileForInfo) { FileInfoSheet(file: $0) }
             .onAppear { viewModel.refreshMusicList() }
         }
@@ -77,14 +68,6 @@ struct LocalMusicView: View {
         fileToDelete = nil
     }
 
-    private func deleteCurrentFolder() {
-        guard let folder = folderToDelete else { return }
-        for file in folder.files {
-            viewModel.deleteFile(file, playerViewModel: playerViewModel)
-        }
-        folderToDelete = nil
-    }
-
     private var folderSection: some View {
         Section("文件夹") {
             ForEach(viewModel.musicFolders) { folder in
@@ -92,11 +75,6 @@ struct LocalMusicView: View {
                     FolderDetailView(folder: folder, parentPath: "", playerViewModel: playerViewModel, selectedTab: $selectedTab, fileToDelete: $fileToDelete, fileForInfo: $fileForInfo)
                 } label: {
                     folderRow(folder)
-                }
-                .swipeActions(edge: .trailing) {
-                    Button(role: .destructive) {
-                        folderToDelete = folder
-                    } label: { Label("删除文件夹", systemImage: "trash") }
                 }
             }
         }
