@@ -248,41 +248,37 @@ struct PlaylistOverlayView: View {
     var body: some View {
         NavigationView {
             List {
-                let musicFiles = LocalMusicManager.shared.getAllMusicFiles()
-                ForEach(musicFiles) { file in
-                    Button(action: {
-                        playMusicFile(file)
-                    }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: isCurrentFile(file) ? "speaker.wave.2.fill" : "music.note")
-                                .font(.system(size: 16))
-                                .foregroundColor(isCurrentFile(file) ? .accentColor : .secondary)
-                                .frame(width: 24)
+                let folders = LocalMusicManager.shared.getMusicByFolders()
+                let looseFiles = LocalMusicManager.shared.getAllMusicFiles().filter { $0.folderIdentifier == "loose" }
 
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(file.title)
-                                    .lineLimit(1)
-                                    .font(.system(size: 16))
-                                    .foregroundColor(.primary)
-                                Text(file.artist)
-                                    .font(.system(size: 13))
-                                    .foregroundColor(.secondary)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer()
-
-                            Text(file.duration.formattedDuration)
-                                .font(.system(size: 14))
-                                .foregroundColor(.secondary)
-                                .monospacedDigit()
+                // 文件夹分组
+                ForEach(folders) { folder in
+                    Section {
+                        ForEach(folder.files) { file in
+                            playlistRow(file)
                         }
-                        .padding(.vertical, 4)
+                    } header: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder.fill")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                            Text(folder.path)
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                        }
                     }
-                    .id(file.id)
+                }
+
+                // 零散文件
+                if !looseFiles.isEmpty {
+                    Section("文件") {
+                        ForEach(looseFiles) { file in
+                            playlistRow(file)
+                        }
+                    }
                 }
             }
-            .listStyle(.plain)
+            .listStyle(.insetGrouped)
             .navigationTitle("播放列表")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -306,6 +302,25 @@ struct PlaylistOverlayView: View {
                 Text("确定要清空所有音乐吗？此操作无法撤销。")
             }
         }
+    }
+
+    private func playlistRow(_ file: MusicFile) -> some View {
+        Button(action: { playMusicFile(file) }) {
+            HStack(spacing: 12) {
+                Image(systemName: isCurrentFile(file) ? "speaker.wave.2.fill" : "music.note")
+                    .font(.system(size: 16))
+                    .foregroundColor(isCurrentFile(file) ? .accentColor : .secondary)
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(file.title).lineLimit(1).font(.system(size: 16)).foregroundColor(.primary)
+                    Text(file.artist).font(.system(size: 13)).foregroundColor(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Text(file.duration.formattedDuration).font(.system(size: 14)).foregroundColor(.secondary).monospacedDigit()
+            }
+            .padding(.vertical, 4)
+        }
+        .id(file.id)
     }
 
     private func isCurrentFile(_ file: MusicFile) -> Bool {

@@ -12,6 +12,7 @@ struct MusicFile: Codable, Identifiable {
     var title: String
     var artist: String
     var duration: TimeInterval
+    var isFavorite: Bool = false  // 收藏标记
     let fileSize: Int64           // 文件字节数
 
     var fileFormat: String {
@@ -100,9 +101,9 @@ class LocalMusicManager {
 
     func getMusicByFolders() -> [MusicFolder] {
         if let cached = cachedFolders { return cached }
-        let files = loadMusicFiles()
+        let folderFiles = loadMusicFiles().filter { $0.folderIdentifier != "loose" }
         var dict: [String: [MusicFile]] = [:]
-        for file in files {
+        for file in folderFiles {
             dict[file.folderIdentifier, default: []].append(file)
         }
         let result = dict.map { (id: String, files: [MusicFile]) in
@@ -115,7 +116,7 @@ class LocalMusicManager {
             a.path.localizedStandardCompare(b.path) == .orderedAscending
         }
         cachedFolders = result
-        cachedFiles = files
+        // 注意：不要污染 cachedFiles，让 getAllMusicFiles 自己管理缓存
         return result
     }
 
@@ -158,6 +159,19 @@ class LocalMusicManager {
 
     /// 为 MusicFile 解析完整可访问的文件 URL
     func resolveFileURL(for file: MusicFile) -> (url: URL, rootURL: URL)? {
+        // 零散文件：用文件级书签
+        if file.folderIdentifier == "loose" {
+            guard let bookmarkData = getBookmarkData(for: file.id) else { return nil }
+            var isStale = false
+            guard let url = try? URL(resolvingBookmarkData: bookmarkData, bookmarkDataIsStale: &isStale),
+                  url.startAccessingSecurityScopedResource() else { return nil }
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                url.stopAccessingSecurityScopedResource()
+                return nil
+            }
+            return (url, url)
+        }
+        // 文件夹导入：用文件夹级书签
         guard let rootURL = resolveBookmark(for: file.folderIdentifier) else { return nil }
         let fileURL = rootURL.appendingPathComponent(file.relativePath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -184,24 +198,20 @@ class LocalMusicManager {
                 let ext = url.pathExtension.lowercased()
                 guard ["mp3", "wav", "m4a", "aac"].contains(ext) else { continue }
 
-                let folderName = "导入的文件"
-                let folderId = "imported-files"
-
-                // 首次创建虚拟文件夹书签
-                if bookmarks[folderId] == nil {
-                    if let bookmarkData = try? url.deletingLastPathComponent().bookmarkData(options: []) {
-                        bookmarks[folderId] = bookmarkData
-                    }
-                }
-
                 let meta = await self.loadMetadataAsync(from: url)
                 let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let fileId = UUID().uuidString
+
+                // 为每个零散文件创建独立书签
+                if let fileBookmark = try? url.bookmarkData(options: []) {
+                    bookmarks[fileId] = fileBookmark
+                }
 
                 newFiles.append(MusicFile(
-                    id: UUID().uuidString,
+                    id: fileId,
                     fileName: url.lastPathComponent,
-                    folderPath: folderName,
-                    folderIdentifier: folderId,
+                    folderPath: "导入的文件",
+                    folderIdentifier: "loose",   // 标记为零散文件
                     relativePath: url.lastPathComponent,
                     title: meta.title ?? url.deletingPathExtension().lastPathComponent,
                     artist: meta.artist ?? "未知艺术家",
@@ -356,13 +366,18 @@ class LocalMusicManager {
         files.removeAll { $0.id == file.id }
         saveMusicFiles(files)
 
-        // 如果该文件夹没有文件了，清理书签
-        let remainingInFolder = files.filter { $0.folderIdentifier == file.folderIdentifier }
-        if remainingInFolder.isEmpty {
-            var bookmarks = loadBookmarks()
-            bookmarks.removeValue(forKey: file.folderIdentifier)
-            saveBookmarks(bookmarks)
+        var bookmarks = loadBookmarks()
+        if file.folderIdentifier == "loose" {
+            // 零散文件：清理文件级书签
+            bookmarks.removeValue(forKey: file.id)
+        } else {
+            // 文件夹导入：如果文件夹空了清理文件夹书签
+            let remaining = files.filter { $0.folderIdentifier == file.folderIdentifier }
+            if remaining.isEmpty {
+                bookmarks.removeValue(forKey: file.folderIdentifier)
+            }
         }
+        saveBookmarks(bookmarks)
     }
 
     func clearAllMusic() {
@@ -385,6 +400,18 @@ class LocalMusicManager {
     }
 
     // MARK: 最后播放
+
+    func toggleFavorite(_ fileId: String) {
+        var files = loadMusicFiles()
+        if let idx = files.firstIndex(where: { $0.id == fileId }) {
+            files[idx].isFavorite.toggle()
+            saveMusicFiles(files)
+        }
+    }
+
+    func getFavorites() -> [MusicFile] {
+        getAllMusicFiles().filter { $0.isFavorite }
+    }
 
     func saveLastPlayedSong(id: String) {
         defaults.set(id, forKey: "lastPlayedSongID")

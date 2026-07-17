@@ -17,15 +17,16 @@ struct LocalMusicView: View {
     @State private var showClearConfirmation = false
     @State private var fileToDelete: MusicFile?
     @State private var fileForInfo: MusicFile?
-    @State private var selectedFolder: MusicFolder? = nil
+    @State private var folderToDelete: MusicFolder?
     @Binding var selectedTab: Int
 
     var body: some View {
         NavigationView {
             List {
-                if viewModel.musicFolders.isEmpty {
+                if viewModel.musicFolders.isEmpty && looseFiles.isEmpty {
                     emptyView
                 } else {
+                    favoritesSection
                     folderSection
                     looseFilesSection
                 }
@@ -54,6 +55,14 @@ struct LocalMusicView: View {
                 Button("取消", role: .cancel) { fileToDelete = nil }
                 Button("删除", role: .destructive) { deleteCurrentFile() }
             } message: { Text(fileToDelete.map { "确定要删除「\($0.title)」吗？" } ?? "") }
+            .alert("删除文件夹", isPresented: Binding(get: { folderToDelete != nil }, set: { if !$0 { folderToDelete = nil } })) {
+                Button("取消", role: .cancel) { folderToDelete = nil }
+                Button("删除", role: .destructive) { deleteCurrentFolder() }
+            } message: {
+                if let f = folderToDelete {
+                    Text("确定要删除「\(f.path)」及其全部 \(f.files.count) 首歌曲吗？")
+                }
+            }
             .sheet(item: $fileForInfo) { FileInfoSheet(file: $0) }
             .onAppear { viewModel.refreshMusicList() }
         }
@@ -69,13 +78,41 @@ struct LocalMusicView: View {
         fileToDelete = nil
     }
 
+    private func deleteCurrentFolder() {
+        guard let folder = folderToDelete else { return }
+        for file in folder.files {
+            viewModel.deleteFile(file, playerViewModel: playerViewModel)
+        }
+        folderToDelete = nil
+    }
+
+    private var favoritesSection: some View {
+        let favs = LocalMusicManager.shared.getFavorites()
+        if favs.isEmpty { return AnyView(EmptyView()) }
+        return AnyView(
+            Section {
+                ForEach(favs) { file in
+                    fileRow(file)
+                }
+            } header: {
+                Label("收藏", systemImage: "heart.fill")
+                    .foregroundColor(.red)
+            }
+        )
+    }
+
     private var folderSection: some View {
         Section("文件夹") {
             ForEach(viewModel.musicFolders) { folder in
                 NavigationLink {
-                    FolderDetailView(folder: folder, playerViewModel: playerViewModel, selectedTab: $selectedTab, fileToDelete: $fileToDelete, fileForInfo: $fileForInfo)
+                    FolderDetailView(folder: folder, parentPath: "", playerViewModel: playerViewModel, selectedTab: $selectedTab, fileToDelete: $fileToDelete, fileForInfo: $fileForInfo)
                 } label: {
                     folderRow(folder)
+                }
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        folderToDelete = folder
+                    } label: { Label("删除文件夹", systemImage: "trash") }
                 }
             }
         }
@@ -88,16 +125,13 @@ struct LocalMusicView: View {
                 Text(folder.path).font(.system(size: 16, weight: .medium))
                 Text("\(folder.files.count) 首").font(.system(size: 13)).foregroundColor(.secondary)
             }
-            Spacer()
-            Image(systemName: "chevron.right").font(.system(size: 14)).foregroundColor(.secondary)
         }
         .padding(.vertical, 4)
     }
 
     private var looseFiles: [MusicFile] {
-        viewModel.musicFolders
-            .flatMap { $0.files }
-            .filter { $0.folderIdentifier == "imported-files" }
+        LocalMusicManager.shared.getAllMusicFiles()
+            .filter { $0.folderIdentifier == "loose" }
     }
 
     @ViewBuilder
@@ -115,7 +149,8 @@ struct LocalMusicView: View {
         LocalMusicItemView(
             musicFile: file,
             action: { viewModel.playMusic(file, playerViewModel: playerViewModel, selectedTab: $selectedTab) },
-            onInfo: { fileForInfo = file }
+            onInfo: { fileForInfo = file },
+            onFavorite: { LocalMusicManager.shared.toggleFavorite(file.id); viewModel.refreshMusicList() }
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) { fileToDelete = file } label: {
@@ -152,36 +187,46 @@ struct LocalMusicView: View {
 
 struct FolderDetailView: View {
     let folder: MusicFolder
+    let parentPath: String  // 累积路径，如 "" 或 "subdir/" 或 "subdir/deeper/"
     @ObservedObject var playerViewModel: PlayerViewModel
     @Binding var selectedTab: Int
     @Binding var fileToDelete: MusicFile?
     @Binding var fileForInfo: MusicFile?
 
+    // 当前层级的直接文件（relativePath 去掉 parentPath 后不含 "/"）
+    private var directFiles: [MusicFile] {
+        let prefix = parentPath
+        return folder.files.filter { file in
+            let rel = file.relativePath
+            guard rel.hasPrefix(prefix) else { return false }
+            let sub = String(rel.dropFirst(prefix.count))
+            return !sub.contains("/")
+        }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    // 当前层级的子目录
     private var subfolders: [(name: String, files: [MusicFile])] {
+        let prefix = parentPath
         var dirs: [String: [MusicFile]] = [:]
         for file in folder.files {
-            let parts = file.relativePath.components(separatedBy: "/")
+            let rel = file.relativePath
+            guard rel.hasPrefix(prefix) else { continue }
+            let sub = String(rel.dropFirst(prefix.count))
+            let parts = sub.components(separatedBy: "/")
             if parts.count > 1 {
-                let subDir = parts[0]
-                var f = file
-                f.relativePath = parts.dropFirst().joined(separator: "/")
-                dirs[subDir, default: []].append(f)
+                dirs[parts[0], default: []].append(file)
             }
         }
         return dirs.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
-    }
-
-    private var directFiles: [MusicFile] {
-        folder.files.filter { !$0.relativePath.contains("/") }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
     }
 
     var body: some View {
         List {
             ForEach(subfolders, id: \.name) { sub in
                 let subfolder = MusicFolder(path: sub.name, files: sub.files)
+                let childPath = parentPath + sub.name + "/"
                 NavigationLink {
-                    FolderDetailView(folder: subfolder, playerViewModel: playerViewModel, selectedTab: $selectedTab, fileToDelete: $fileToDelete, fileForInfo: $fileForInfo)
+                    FolderDetailView(folder: subfolder, parentPath: childPath, playerViewModel: playerViewModel, selectedTab: $selectedTab, fileToDelete: $fileToDelete, fileForInfo: $fileForInfo)
                 } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "folder.fill").foregroundColor(.accentColor)
@@ -195,7 +240,8 @@ struct FolderDetailView: View {
             ForEach(directFiles) { file in
                 LocalMusicItemView(musicFile: file, action: {
                     playInFolder(file)
-                }, onInfo: { fileForInfo = file })
+                }, onInfo: { fileForInfo = file },
+                   onFavorite: { LocalMusicManager.shared.toggleFavorite(file.id) })
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) { fileToDelete = file } label: { Label("删除", systemImage: "trash") }
                 }
