@@ -1,0 +1,150 @@
+import SwiftUI
+import AVFoundation
+
+// 播放器主视图
+struct PlayerContentView: View {
+    @ObservedObject var playerViewModel: PlayerViewModel
+    @Binding var selectedTab: Int
+    @State private var showPlaylist = false
+
+    var body: some View {
+        Group {
+            if playerViewModel.currentSong == nil {
+                emptyStateView
+            } else {
+                playerUIView
+            }
+        }
+    }
+
+    // MARK: - 空状态引导页
+    private var emptyStateView: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            ZStack {
+                Circle()
+                    .fill(Color(.systemGray6))
+                    .frame(width: 120, height: 120)
+                Image(systemName: "headphones")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 50, height: 50)
+                    .foregroundColor(.accentColor)
+            }
+
+            VStack(spacing: 8) {
+                Text("个播")
+                    .font(.title)
+                    .bold()
+                Text("你的随身音频播放器")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                featureRow(icon: "folder.badge.plus", text: "导入本地音频文件或文件夹")
+                featureRow(icon: "goforward.plus", text: "6 档变速播放，学习听课更高效")
+                featureRow(icon: "clock.arrow.circlepath", text: "自动记忆每个文件的播放位置")
+                featureRow(icon: "lock.display", text: "锁屏控制 + 后台持续播放")
+            }
+            .padding(.horizontal, 40)
+
+            Spacer()
+
+            Button {
+                selectedTab = 1
+            } label: {
+                HStack {
+                    Image(systemName: "plus.circle.fill")
+                    Text("导入音频")
+                }
+                .font(.headline)
+                .foregroundColor(.white)
+                .padding(.horizontal, 40)
+                .padding(.vertical, 14)
+                .background(Color.accentColor)
+                .cornerRadius(12)
+            }
+
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func featureRow(icon: String, text: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(.accentColor)
+                .frame(width: 24)
+            Text(text)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+        }
+    }
+
+    // MARK: - 播放界面
+    private var playerUIView: some View {
+        VStack(spacing: 20) {
+            // 标题
+            Text("我的音乐")
+                .font(.title)
+                .padding(.top, 20)
+
+            // 专辑封面
+            AlbumCoverView(isRotating: playerViewModel.isPlaying)
+                .padding(.top, 10)
+
+            // 歌曲信息
+            VStack(spacing: 8) {
+                Text(playerViewModel.currentSong?.title ?? "未在播放")
+                    .font(.title2)
+                    .bold()
+                Text(playerViewModel.currentSong?.artist ?? "")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+            }
+            .padding(.top, 5)
+
+            // 播放进度
+            PulsingProgressView(
+                progress: Double(playerViewModel.progress),
+                isPlaying: playerViewModel.isPlaying,
+                onSeek: { progress in
+                    playerViewModel.seek(to: Float(progress))
+                },
+                currentTime: playerViewModel.currentTimeString,
+                duration: playerViewModel.durationString
+            )
+            .padding(.horizontal)
+
+            // 播放控制
+            PlaybackControlsView(playerViewModel: playerViewModel)
+                .padding(.top, 10)
+
+            // 播放列表按钮
+            Button {
+                showPlaylist = true
+            } label: {
+                HStack {
+                    Image(systemName: "music.note.list")
+                    Text("播放列表")
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 20)
+                .background(Color.black.opacity(0.1))
+                .cornerRadius(20)
+            }
+            .padding(.top, 40)
+
+            Spacer()
+        }
+        .padding()
+        .sheet(isPresented: $showPlaylist) {
+            PlaylistOverlayView(showPlaylist: $showPlaylist, playerViewModel: playerViewModel)
+                .presentationDetents([.medium, .large])
+        }
+    }
+}
+

@@ -247,15 +247,9 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
         guard let url = resolvedURL else { return }
         guard FileManager.default.fileExists(atPath: url.path) else { return }
 
-        // 如果播放列表为空，从本地音乐库构建（确保上/下一首可用）
-        if playlist.isEmpty {
-            let allFiles = LocalMusicManager.shared.getAllMusicFiles()
-            if !allFiles.isEmpty {
-                playlist = allFiles.map { file in
-                    Song(title: file.title, artist: file.artist, duration: file.duration,
-                         url: nil, folderPath: file.folderPath, folderIdentifier: file.folderIdentifier, relativePath: file.relativePath)
-                }
-            }
+        // 确保当前歌曲在播放列表中
+        if getCurrentIndex() == nil {
+            playlist.append(song)
         }
 
         stop()
@@ -328,6 +322,13 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
                 }
                 playSong(song)
             }
+        }
+    }
+
+    func setPlaylist(from files: [MusicFile]) {
+        playlist = files.map { file in
+            Song(title: file.title, artist: file.artist, duration: file.duration,
+                 url: nil, folderPath: file.folderPath, folderIdentifier: file.folderIdentifier, relativePath: file.relativePath)
         }
     }
 

@@ -51,6 +51,11 @@ class LocalMusicViewModel: ObservableObject {
             folderIdentifier: file.folderIdentifier,
             relativePath: file.relativePath
         )
+        // 设置当前文件夹为播放列表上下文
+        let contextFiles = file.folderIdentifier == "loose"
+            ? LocalMusicManager.shared.getAllMusicFiles().filter { $0.folderIdentifier == "loose" }
+            : (LocalMusicManager.shared.getAllMusicFiles().filter { $0.folderIdentifier == file.folderIdentifier })
+        playerViewModel.setPlaylist(from: contextFiles)
         playerViewModel.playSong(song)
 
         // 跳转到播放界面

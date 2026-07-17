@@ -72,6 +72,7 @@ struct LocalMusicItemView: View {
                             .foregroundColor(musicFile.isFavorite ? .red : .secondary)
                     }
                     .buttonStyle(.plain)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.5), value: musicFile.isFavorite)
                 }
 
                 // 信息按钮
