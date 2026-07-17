@@ -47,3 +47,4 @@ personnalMusic/music/*.m4a
 *.p12
 *.mobileprovision
 *.cer
+FEATURE_SPEC.md
