@@ -31,13 +31,6 @@ struct ContentView: View {
                 }
                 .tag(1)
 
-            // 收藏标签页
-            FavoritesView(playerViewModel: playerViewModel, selectedTab: $selectedTab)
-                .tabItem {
-                    Image(systemName: "heart.fill")
-                    Text("收藏")
-                }
-                .tag(2)
         }
         .accentColor(.primary)
         .onAppear {

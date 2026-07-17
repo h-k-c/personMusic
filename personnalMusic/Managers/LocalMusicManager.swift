@@ -356,18 +356,6 @@ class LocalMusicManager {
 
     // MARK: 最后播放
 
-    func toggleFavorite(_ fileId: String) {
-        var files = loadMusicFiles()
-        if let idx = files.firstIndex(where: { $0.id == fileId }) {
-            files[idx].isFavorite.toggle()
-            saveMusicFiles(files)
-        }
-    }
-
-    func getFavorites() -> [MusicFile] {
-        getAllMusicFiles().filter { $0.isFavorite }
-    }
-
     func saveLastPlayedSong(id: String) {
         defaults.set(id, forKey: "lastPlayedSongID")
     }

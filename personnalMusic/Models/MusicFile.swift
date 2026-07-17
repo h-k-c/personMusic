@@ -17,7 +17,6 @@ struct MusicFile: Codable, Identifiable {
     var title: String
     var artist: String
     var duration: TimeInterval
-    var isFavorite: Bool = false  // 收藏标记
     let fileSize: Int64           // 文件字节数
 
     var fileFormat: String {

@@ -77,9 +77,6 @@ struct PlaylistOverlayView: View {
                     Text(file.artist).font(.system(size: 13)).foregroundColor(.secondary).lineLimit(1)
                 }
                 Spacer()
-                if file.isFavorite {
-                    Image(systemName: "heart.fill").font(.system(size: 12)).foregroundColor(.red)
-                }
                 Text(file.duration.formattedDuration).font(.system(size: 14)).foregroundColor(.secondary).monospacedDigit()
             }
             .padding(.vertical, 4)

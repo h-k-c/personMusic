@@ -10,16 +10,13 @@ struct LocalMusicItemView: View {
     let musicFile: MusicFile
     let action: () -> Void
     let onInfo: (() -> Void)?
-    let favToggle: (() -> Void)?
 
     init(musicFile: MusicFile,
          action: @escaping () -> Void,
-         onInfo: (() -> Void)? = nil,
-         favToggle: (() -> Void)? = nil) {
+         onInfo: (() -> Void)? = nil) {
         self.musicFile = musicFile
         self.action = action
         self.onInfo = onInfo
-        self.favToggle = favToggle
     }
 
     var body: some View {
@@ -59,10 +56,7 @@ struct LocalMusicItemView: View {
 
                 Spacer()
 
-                // 收藏按钮（自带状态 + 弹跳动效）
-                FavoriteButton(fileId: musicFile.id, isFavorite: musicFile.isFavorite, onToggle: favToggle)
-
-                // 信息按钮（非 Button，避免嵌套手势冲突）
+                // 信息按钮
                 if let onInfo = onInfo {
                     Image(systemName: "info.circle")
                         .font(.system(size: 16))

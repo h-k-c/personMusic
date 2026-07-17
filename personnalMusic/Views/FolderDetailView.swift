@@ -10,7 +10,7 @@ struct FolderDetailView: View {
     @Binding var selectedTab: Int
     @Binding var fileToDelete: MusicFile?
     @Binding var fileForInfo: MusicFile?
-    @State private var refreshID = UUID()
+    @State private var refreshID = UUID()  // 用于子文件夹删除后刷新
 
     // 当前层级的直接文件（relativePath 去掉 parentPath 后不含 "/"）
     private var directFiles: [MusicFile] {
@@ -67,7 +67,7 @@ struct FolderDetailView: View {
             ForEach(directFiles) { file in
                 LocalMusicItemView(musicFile: file, action: {
                     playInFolder(file)
-                }, onInfo: { fileForInfo = file }, favToggle: { refreshID = UUID() })
+                }, onInfo: { fileForInfo = file })
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) { fileToDelete = file } label: { Label("删除", systemImage: "trash") }
                 }
