@@ -26,6 +26,8 @@
     <string>18.2</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>用于锁屏播放控制和音乐信息显示</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
     <key>UIBackgroundModes</key>
