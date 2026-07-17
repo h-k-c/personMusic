@@ -42,7 +42,7 @@ struct LocalMusicView: View {
                     .listRowBackground(Color.clear)
                 } else {
                     ForEach(viewModel.musicFolders) { folder in
-                        Section(header: Text(folder.path)) {
+                        Section {
                             ForEach(folder.files) { file in
                                 LocalMusicItemView(
                                     musicFile: file,
@@ -61,6 +61,18 @@ struct LocalMusicView: View {
                                     }
                                 }
                             }
+                        } header: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "folder.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.accentColor)
+                                Text(folder.path)
+                                    .font(.system(size: 14, weight: .semibold))
+                                Spacer()
+                                Text("\(folder.files.count) 首")
+                                    .font(.system(size: 12))
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                 }
@@ -68,16 +80,9 @@ struct LocalMusicView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
-                    VStack(spacing: 4) {
-                        Text("本地音乐")
-                            .font(.system(size: 20, weight: .semibold))
-                            .foregroundColor(.primary)
-                        
-                        // 添加一个小横线装饰
-                        Rectangle()
-                            .frame(width: 30, height: 2)
-                            .foregroundColor(.accentColor)
-                    }
+                    Text("本地音乐")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(.primary)
                 }
                 
                 ToolbarItem(placement: .navigationBarLeading) {

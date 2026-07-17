@@ -33,6 +33,8 @@ struct ContentView: View {
         }
         .accentColor(.primary)
         .onAppear {
+            // 激活音频会话（后台播放必须）
+            try? AVAudioSession.sharedInstance().setActive(true)
             // 恢复上次播放
             playerViewModel.restoreLastPlayback()
         }
@@ -180,9 +182,8 @@ struct PlayerContentView: View {
         }
         .padding()
         .sheet(isPresented: $showPlaylist) {
-            NavigationView {
-                PlaylistOverlayView(showPlaylist: $showPlaylist, playerViewModel: playerViewModel)
-            }
+            PlaylistOverlayView(showPlaylist: $showPlaylist, playerViewModel: playerViewModel)
+                .presentationDetents([.medium, .large])
         }
     }
 }
@@ -242,160 +243,94 @@ struct PlaylistItemView: View {
 struct PlaylistOverlayView: View {
     @Binding var showPlaylist: Bool
     @ObservedObject var playerViewModel: PlayerViewModel
-    @ObservedObject private var themeManager = ThemeManager.shared
-    @State private var scrollProxy: ScrollViewProxy? = nil
     @State private var showClearConfirmation = false
-    
+
     var body: some View {
-        ZStack {
-            // 背景遮罩
-            Color.black.opacity(0.4)
-                .edgesIgnoringSafeArea(.all)
-                .onTapGesture {
-                    showPlaylist = false
-                }
-            
-            // 播放列表内容
-            VStack(spacing: 0) {
-                // 标题栏
-                HStack {
-                    Text("播放列表")
-                        .font(.headline)
-                    
-                    Spacer()
-                    
-                    // 清空按钮
+        NavigationView {
+            List {
+                let musicFiles = LocalMusicManager.shared.getAllMusicFiles()
+                ForEach(musicFiles) { file in
                     Button(action: {
-                        showClearConfirmation = true
+                        playMusicFile(file)
                     }) {
-                        Image(systemName: "trash")
-                            .foregroundColor(.red)
-                            .imageScale(.large)
-                    }
-                    .padding(.trailing, 8)
-                    
-                    Button(action: {
-                        showPlaylist = false
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.gray)
-                            .imageScale(.large)
-                    }
-                }
-                .padding()
-                .background(Color(.systemBackground).opacity(0.9))
-                
-                // 列表内容
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        // 缓存文件列表，避免 ForEach 中反复反序列化 UserDefaults
-                        let musicFiles = LocalMusicManager.shared.getAllMusicFiles()
-                        LazyVStack(spacing: 0) {
-                            ForEach(musicFiles) { file in
-                                VStack(spacing: 0) {
-                                    Button(action: {
-                                        playMusicFile(file)
-                                    }) {
-                                        HStack {
-                                            // 播放指示器
-                                            if playerViewModel.currentSong?.title == file.title {
-                                                Image(systemName: "play.fill")
-                                                    .foregroundColor(.accentColor)
-                                            } else {
-                                                Image(systemName: "music.note")
-                                                    .foregroundColor(.gray)
-                                            }
+                        HStack(spacing: 12) {
+                            Image(systemName: isCurrentFile(file) ? "speaker.wave.2.fill" : "music.note")
+                                .font(.system(size: 16))
+                                .foregroundColor(isCurrentFile(file) ? .accentColor : .secondary)
+                                .frame(width: 24)
 
-                                            // 歌曲信息
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(file.title)
-                                                    .lineLimit(1)
-                                                    .foregroundColor(.primary)
-                                                Text(file.artist)
-                                                    .font(.caption)
-                                                    .foregroundColor(.gray)
-                                                    .lineLimit(1)
-                                            }
-
-                                            Spacer()
-
-                                            // 时长
-                                            Text(file.duration.formattedDuration)
-                                                .font(.caption)
-                                                .foregroundColor(.gray)
-                                        }
-                                        .padding(.horizontal)
-                                        .padding(.vertical, 8)
-                                    }
-                                    .id(file.id)
-
-                                    if file.id != musicFiles.last?.id {
-                                        Divider()
-                                            .padding(.leading, 60)
-                                    }
-                                }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(file.title)
+                                    .lineLimit(1)
+                                    .font(.system(size: 16))
+                                    .foregroundColor(.primary)
+                                Text(file.artist)
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
                             }
+
+                            Spacer()
+
+                            Text(file.duration.formattedDuration)
+                                .font(.system(size: 14))
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
                         }
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 4)
                     }
-                    .onAppear {
-                        scrollProxy = proxy
-                        scrollToCurrentSong()
+                    .id(file.id)
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("播放列表")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(role: .destructive) {
+                        showClearConfirmation = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("完成") {
+                        showPlaylist = false
                     }
                 }
             }
-            .background(Color(.systemBackground))
-            .cornerRadius(15)
-            .shadow(radius: 20)
-            .frame(maxWidth: .infinity, maxHeight: 400)
-            .padding(.horizontal, 20)
-            .alert(isPresented: $showClearConfirmation) {
-                Alert(
-                    title: Text("确认清空"),
-                    message: Text("确定要清空所有音乐吗？此操作无法撤销。"),
-                    primaryButton: .destructive(Text("清空")) {
-                        clearAllMusic()
-                    },
-                    secondaryButton: .cancel(Text("取消"))
-                )
+            .alert("确认清空", isPresented: $showClearConfirmation) {
+                Button("取消", role: .cancel) {}
+                Button("清空", role: .destructive) { clearAllMusic() }
+            } message: {
+                Text("确定要清空所有音乐吗？此操作无法撤销。")
             }
         }
     }
-    
-    private func scrollToCurrentSong() {
-        guard let currentSong = playerViewModel.currentSong,
-              let currentFile = LocalMusicManager.shared.getAllMusicFiles().first(where: { $0.title == currentSong.title }) else {
-            return
-        }
-        
-        withAnimation {
-            scrollProxy?.scrollTo(currentFile.id, anchor: .center)
-        }
+
+    private func isCurrentFile(_ file: MusicFile) -> Bool {
+        guard let song = playerViewModel.currentSong else { return false }
+        return song.folderPath == file.folderPath && song.relativePath == file.relativePath
     }
-    
+
     private func playMusicFile(_ file: MusicFile) {
-        if let url = LocalMusicManager.shared.getAccessibleURL(for: file) {
-            let song = Song(
-                title: file.title,
-                artist: file.artist,
-                duration: file.duration,
-                url: url
-            )
-            playerViewModel.playSong(song)
-            showPlaylist = false
-        }
+        guard let result = LocalMusicManager.shared.resolveFileURL(for: file) else { return }
+        let song = Song(
+            title: file.title,
+            artist: file.artist,
+            duration: file.duration,
+            url: result.url,
+            securityScopedRootURL: result.rootURL,
+            folderPath: file.folderPath,
+            relativePath: file.relativePath
+        )
+        playerViewModel.playSong(song)
+        showPlaylist = false
     }
-    
-    // 清空所有音乐
+
     private func clearAllMusic() {
-        // 停止当前播放
         playerViewModel.clearPlayback()
-        // 清空本地音乐管理器中的音乐文件
         LocalMusicManager.shared.clearAllMusic()
-        // 关闭播放列表
         showPlaylist = false
     }
 }
-
-
-

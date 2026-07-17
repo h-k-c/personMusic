@@ -1,95 +1,41 @@
 import Foundation
 import AVFoundation
 
+// MARK: - 音乐文件模型（文件夹书签版）
+
 struct MusicFile: Codable, Identifiable {
     let id: String
-    let url: URL
-    let folderPath: String
-    let fileName: String
+    let fileName: String          // 原始文件名 "song.mp3"
+    let folderPath: String        // 来源文件夹显示名（也是书签 key）
+    let relativePath: String      // 文件相对源文件夹根目录的路径
     var title: String
     var artist: String
     var duration: TimeInterval
-    let bookmarkData: Data?
-    
-    init(url: URL) {
-        self.id = UUID().uuidString
-        self.url = url
-        self.folderPath = url.deletingLastPathComponent().lastPathComponent // 只保留最后一级文件夹名
-        self.fileName = url.lastPathComponent
-        self.title = url.deletingPathExtension().lastPathComponent
-        self.artist = "本地音乐"
-        self.duration = 0
-        
-        // 安全作用域的书签
-        do {
-            self.bookmarkData = try url.bookmarkData(
-                options: .minimalBookmark,
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            )
-        } catch {
-            print("创建书签失败: \(error)")
-            self.bookmarkData = nil
-        }
-    }
-    
-    // 获取可访问的URL
-    func resolveURL() -> URL? {
-        guard let bookmarkData = bookmarkData else { return nil }
+    let fileSize: Int64           // 文件字节数
 
-        do {
-            var isStale = false
-            let resolvedURL = try URL(
-                resolvingBookmarkData: bookmarkData,
-                options: [],  // 移除 .withSecurityScope 选项
-                relativeTo: nil,
-                bookmarkDataIsStale: &isStale
-            )
-
-            return resolvedURL
-        } catch {
-            print("解析书签失败: \(error)")
-            return nil
-        }
-    }
-
-    // MARK: - 文件信息
-
-    /// 文件格式（大写扩展名）
     var fileFormat: String {
-        url.pathExtension.uppercased()
+        fileName.components(separatedBy: ".").last?.uppercased() ?? "?"
     }
 
-    /// 文件大小（格式化字符串）
     var fileSizeString: String {
-        let fileManager = FileManager.default
-        guard let attrs = try? fileManager.attributesOfItem(atPath: url.path),
-              let fileSize = attrs[.size] as? Int64 else {
-            return "未知"
-        }
         let formatter = ByteCountFormatter()
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
         return formatter.string(fromByteCount: fileSize)
     }
 
-    /// 文件大小（字节）
-    var fileSize: Int64 {
-        let fileManager = FileManager.default
-        guard let attrs = try? fileManager.attributesOfItem(atPath: url.path),
-              let size = attrs[.size] as? Int64 else {
-            return 0
-        }
-        return size
+    /// 不带扩展名的原始文件名
+    var titleFromFileName: String {
+        (fileName as NSString).deletingPathExtension
     }
 }
 
-// 添加用于按文件夹组织的结构
+// MARK: - 按文件夹组织
+
 struct MusicFolder: Identifiable {
     let id: String
     let path: String
     var files: [MusicFile]
-    
+
     init(path: String, files: [MusicFile]) {
         self.id = UUID().uuidString
         self.path = path
@@ -97,252 +43,345 @@ struct MusicFolder: Identifiable {
     }
 }
 
+// MARK: - 本地音乐管理器（文件夹书签版）
+
 class LocalMusicManager {
     static let shared = LocalMusicManager()
-    private let userDefaults = UserDefaults.standard
-    private let musicFilesKey = "musicFiles"
-    private let musicFoldersKey = "musicFolders"
-    
-    private init() {}  // 确保单例模式
-    
-    // 保存音乐文件信息
-    private func saveMusicFiles(_ musicFiles: [MusicFile]) {
-        if let encoded = try? JSONEncoder().encode(musicFiles) {
-            userDefaults.set(encoded, forKey: musicFilesKey)
+    private let defaults = UserDefaults.standard
+    private let musicFilesKey = "musicFiles_v3"
+    private let folderBookmarksKey = "folderBookmarks_v1"
+
+    private init() {}
+
+    // MARK: 文件夹书签持久化
+
+    private func loadBookmarks() -> [String: Data] {
+        defaults.dictionary(forKey: folderBookmarksKey) as? [String: Data] ?? [:]
+    }
+
+    private func saveBookmarks(_ bookmarks: [String: Data]) {
+        defaults.set(bookmarks, forKey: folderBookmarksKey)
+    }
+
+    // MARK: 音乐文件列表持久化
+
+    private func saveMusicFiles(_ files: [MusicFile]) {
+        if let data = try? JSONEncoder().encode(files) {
+            defaults.set(data, forKey: musicFilesKey)
         }
     }
-    
-    // 加载音乐文件信息
+
     func loadMusicFiles() -> [MusicFile] {
-        guard let data = userDefaults.data(forKey: musicFilesKey),
-              let musicFiles = try? JSONDecoder().decode([MusicFile].self, from: data) else {
-            return []
-        }
-        return musicFiles
+        guard let data = defaults.data(forKey: musicFilesKey),
+              let files = try? JSONDecoder().decode([MusicFile].self, from: data)
+        else { return [] }
+        return files
     }
-    
-    // 添加音乐文件夹（在后台队列扫描，不阻塞 UI）
-    func addMusicFolder(_ folderURL: URL) {
-        guard folderURL.startAccessingSecurityScopedResource() else {
-            print("无法访问文件夹")
-            return
-        }
 
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            defer { folderURL.stopAccessingSecurityScopedResource() }
+    // MARK: 获取所有文件
+
+    func getAllMusicFiles() -> [MusicFile] {
+        let folders = getMusicByFolders()
+        var all: [MusicFile] = []
+        for folder in folders { all.append(contentsOf: folder.files) }
+        return all
+    }
+
+    func getMusicByFolders() -> [MusicFolder] {
+        let files = loadMusicFiles()
+        var dict: [String: [MusicFile]] = [:]
+        for file in files {
+            dict[file.folderPath, default: []].append(file)
+        }
+        return dict.map { MusicFolder(path: $0.key, files: $0.value.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }) }
+            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+    }
+
+    // MARK: 书签解析
+
+    /// 获取文件夹书签数据
+    func getBookmarkData(for folderPath: String) -> Data? {
+        loadBookmarks()[folderPath]
+    }
+
+    /// 解析书签并启动安全域访问，返回根 URL
+    /// 调用方需在用完后调用 stopAccessingSecurityScopedResource()
+    func resolveBookmark(for folderPath: String) -> URL? {
+        guard let bookmarkData = getBookmarkData(for: folderPath) else {
+            return nil
+        }
+        var isStale = false
+        do {
+            let url = try URL(resolvingBookmarkData: bookmarkData, bookmarkDataIsStale: &isStale)
+            if isStale {
+                let newBookmark = try url.bookmarkData(options: [])
+                var bookmarks = loadBookmarks()
+                bookmarks[folderPath] = newBookmark
+                saveBookmarks(bookmarks)
+            }
+            guard url.startAccessingSecurityScopedResource() else { return nil }
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    /// 通过文件夹路径和相对路径直接解析文件 URL（无需 MusicFile 对象）
+    func resolveFileURL(folderPath: String, relativePath: String) -> (url: URL, rootURL: URL)? {
+        guard let rootURL = resolveBookmark(for: folderPath) else { return nil }
+        let fileURL = rootURL.appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            rootURL.stopAccessingSecurityScopedResource()
+            return nil
+        }
+        return (fileURL, rootURL)
+    }
+
+    /// 为 MusicFile 解析完整可访问的文件 URL
+    /// 返回 (文件URL, 安全域根URL)，根URL 需要调用方在 stop 时释放
+    func resolveFileURL(for file: MusicFile) -> (url: URL, rootURL: URL)? {
+        guard let rootURL = resolveBookmark(for: file.folderPath) else { return nil }
+        let fileURL = rootURL.appendingPathComponent(file.relativePath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            rootURL.stopAccessingSecurityScopedResource()
+            return nil
+        }
+        return (fileURL, rootURL)
+    }
+
+    // MARK: 添加文件
+
+    func addMusicFiles(_ urls: [URL]) {
+        Task.detached(priority: .userInitiated) { [weak self] in
             guard let self = self else { return }
+            let existingFiles = self.loadMusicFiles()
+            var bookmarks = self.loadBookmarks()
+            var newFiles: [MusicFile] = []
 
-            var musicFiles = self.loadMusicFiles()
-            let newFiles = self.scanMusicFiles(in: folderURL)
+            // 按父目录分组
+            let grouped = Dictionary(grouping: urls) { $0.deletingLastPathComponent() }
+            for (parentDirURL, fileURLs) in grouped {
+                guard parentDirURL.startAccessingSecurityScopedResource() else { continue }
+                defer { parentDirURL.stopAccessingSecurityScopedResource() }
 
-            let newMusicFiles = newFiles.filter { newFile in
-                !musicFiles.contains { $0.url.path == newFile.url.path }
-            }
-            musicFiles.append(contentsOf: newMusicFiles)
+                let folderName = parentDirURL.lastPathComponent
+                if bookmarks[folderName] == nil {
+                    if let bookmarkData = try? parentDirURL.bookmarkData(options: []) {
+                        bookmarks[folderName] = bookmarkData
+                    }
+                }
 
-            DispatchQueue.main.async {
-                self.saveMusicFiles(musicFiles)
-                NotificationCenter.default.post(name: .musicFilesDidUpdate, object: nil)
-            }
-        }
-    }
-    
-    // 从音频文件加载元数据
-    private func loadMetadata(from url: URL) -> (title: String?, artist: String?, duration: TimeInterval) {
-        // 开始访问安全作用域的资源
-        guard url.startAccessingSecurityScopedResource() else {
-            return (nil, nil, 0)
-        }
-        defer {
-            url.stopAccessingSecurityScopedResource()
-        }
+                // 收集有效文件
+                var fileInfos: [(url: URL, relPath: String)] = []
+                for url in fileURLs {
+                    let ext = url.pathExtension.lowercased()
+                    guard ["mp3", "wav", "m4a", "aac"].contains(ext) else { continue }
+                    fileInfos.append((url, url.lastPathComponent))
+                }
 
-        let asset = AVURLAsset(url: url)
-        var resultTitle: String?
-        var resultArtist: String?
-        var resultDuration: TimeInterval = 0
-
-        // 使用信号量等异步加载完成
-        let semaphore = DispatchSemaphore(value: 0)
-
-        // 同时加载持续时间和元数据
-        asset.loadValuesAsynchronously(forKeys: ["duration", "commonMetadata"]) {
-            // 加载时长
-            var error: NSError?
-            if asset.statusOfValue(forKey: "duration", error: &error) == .loaded {
-                let duration = asset.duration
-                resultDuration = duration.seconds.isNaN ? 0 : duration.seconds
-            }
-
-            // 加载元数据（commonMetadata 加载完成后可用）
-            let metadata = asset.commonMetadata
-            for item in metadata {
-                if let commonKey = item.commonKey {
-                    switch commonKey.rawValue {
-                    case AVMetadataKey.commonKeyTitle.rawValue:
-                        resultTitle = item.stringValue
-                    case AVMetadataKey.commonKeyArtist.rawValue:
-                        resultArtist = item.stringValue
-                    default:
-                        break
+                // 并发读取元数据
+                if !fileInfos.isEmpty {
+                    let results = await self.batchLoadMetadata(from: fileInfos)
+                    for r in results {
+                        newFiles.append(MusicFile(
+                            id: UUID().uuidString,
+                            fileName: r.fileName,
+                            folderPath: folderName,
+                            relativePath: r.relPath,
+                            title: r.title ?? URL(fileURLWithPath: r.fileName).deletingPathExtension().lastPathComponent,
+                            artist: r.artist ?? "未知艺术家",
+                            duration: r.duration,
+                            fileSize: r.fileSize
+                        ))
                     }
                 }
             }
 
-            semaphore.signal()
-        }
-
-        _ = semaphore.wait(timeout: .now() + 5)  // 等待最多5秒
-        return (resultTitle, resultArtist, resultDuration)
-    }
-
-    // 加载单个音乐文件元数据并返回更新后的 MusicFile（用于 addMusicFiles 路径）
-    private func loadMetadataForFile(_ url: URL) -> MusicFile {
-        var musicFile = MusicFile(url: url)
-        let metadata = loadMetadata(from: url)
-        musicFile.title = metadata.title ?? musicFile.title
-        musicFile.artist = metadata.artist ?? musicFile.artist
-        musicFile.duration = metadata.duration
-        return musicFile
-    }
-    
-    // 扫描文件夹中的音乐文件
-    private func scanMusicFiles(in folderURL: URL) -> [MusicFile] {
-        let fileManager = FileManager.default
-        var musicFiles: [MusicFile] = []
-
-        guard let enumerator = fileManager.enumerator(
-            at: folderURL,
-            includingPropertiesForKeys: [.isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [] }
-
-        for case let fileURL as URL in enumerator {
-            guard let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
-                  let isRegularFile = resourceValues.isRegularFile,
-                  isRegularFile else {
-                continue
-            }
-
-            let fileExtension = fileURL.pathExtension.lowercased()
-            if ["mp3", "wav", "m4a", "aac"].contains(fileExtension) {
-                let musicFile = loadMetadataForFile(fileURL)
-                musicFiles.append(musicFile)
+            let allFiles = existingFiles + newFiles
+            let finalBookmarks = bookmarks
+            await MainActor.run {
+                self.saveBookmarks(finalBookmarks)
+                self.saveMusicFiles(allFiles)
+                NotificationCenter.default.post(name: .musicFilesDidUpdate, object: nil)
             }
         }
+    }
 
-        return musicFiles
-    }
-    
-    // 添加单个音乐文件
-    func addMusicFiles(_ urls: [URL]) {
-        var musicFiles = loadMusicFiles()
-        let newFiles = urls.compactMap { url -> MusicFile? in
-            guard url.startAccessingSecurityScopedResource() else { return nil }
-            defer { url.stopAccessingSecurityScopedResource() }
-            return loadMetadataForFile(url)
-        }
+    // MARK: 添加文件夹
 
-        // 过滤掉已存在的文件
-        let newMusicFiles = newFiles.filter { newFile in
-            !musicFiles.contains { $0.url.path == newFile.url.path }
-        }
+    func addMusicFolder(_ folderURL: URL) {
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self = self else { return }
+            guard folderURL.startAccessingSecurityScopedResource() else { return }
+            defer { folderURL.stopAccessingSecurityScopedResource() }
 
-        musicFiles.append(contentsOf: newMusicFiles)
-        saveMusicFiles(musicFiles)
-    }
-    
-    // 删除音乐文件
-    func removeMusicFile(_ musicFile: MusicFile) {
-        var musicFiles = loadMusicFiles()
-        musicFiles.removeAll { $0.id == musicFile.id }
-        saveMusicFiles(musicFiles)
-    }
-    
-    // 获取可访问的URL
-    func getAccessibleURL(for musicFile: MusicFile) -> URL? {
-        // 尝试从书签恢复URL
-        if let resolvedURL = musicFile.resolveURL() {
-            return resolvedURL
-        }
-        
-        // 如果书签无效，尝试直接使用原始URL
-        if musicFile.url.startAccessingSecurityScopedResource() {
-            return musicFile.url
-        }
-        
-        return nil
-    }
-    
-    // 获取按文件夹组织的音乐文件
-    func getMusicByFolders() -> [MusicFolder] {
-        let musicFiles = loadMusicFiles()
-        var folderDict: [String: [MusicFile]] = [:]
-        
-        // 按文件夹路径组织文件
-        for file in musicFiles {
-            if folderDict[file.folderPath] == nil {
-                folderDict[file.folderPath] = []
+            let folderName = folderURL.lastPathComponent
+            var bookmarks = self.loadBookmarks()
+
+            if bookmarks[folderName] == nil {
+                if let bookmarkData = try? folderURL.bookmarkData(options: []) {
+                    bookmarks[folderName] = bookmarkData
+                }
             }
-            folderDict[file.folderPath]?.append(file)
+
+            // 同步阶段：枚举文件列表（NSEnumerator 不能在 async 上下文使用）
+            let fileInfos: [(url: URL, relPath: String)] = {
+                var infos: [(url: URL, relPath: String)] = []
+                guard let enumerator = FileManager.default.enumerator(
+                    at: folderURL,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles]
+                ) else { return infos }
+                for case let fileURL as URL in enumerator {
+                    guard let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
+                          values.isRegularFile == true else { continue }
+                    let ext = fileURL.pathExtension.lowercased()
+                    guard ["mp3", "wav", "m4a", "aac"].contains(ext) else { continue }
+                    let rootPath = folderURL.path
+                    let filePath = fileURL.path
+                    let relativePath = filePath.hasPrefix(rootPath)
+                        ? String(filePath.dropFirst(rootPath.count + 1))
+                        : fileURL.lastPathComponent
+                    infos.append((fileURL, relativePath))
+                }
+                return infos
+            }()
+
+            // 异步阶段：并发读取元数据
+            let existingFiles = self.loadMusicFiles()
+            let results = await self.batchLoadMetadata(from: fileInfos)
+
+            var newFiles: [MusicFile] = []
+            for r in results {
+                newFiles.append(MusicFile(
+                    id: UUID().uuidString,
+                    fileName: r.fileName,
+                    folderPath: folderName,
+                    relativePath: r.relPath,
+                    title: r.title ?? URL(fileURLWithPath: r.fileName).deletingPathExtension().lastPathComponent,
+                    artist: r.artist ?? "未知艺术家",
+                    duration: r.duration,
+                    fileSize: r.fileSize
+                ))
+            }
+
+            let allFiles = existingFiles + newFiles
+            let finalBookmarks = bookmarks
+            await MainActor.run {
+                self.saveBookmarks(finalBookmarks)
+                self.saveMusicFiles(allFiles)
+                NotificationCenter.default.post(name: .musicFilesDidUpdate, object: nil)
+            }
         }
-        
-        // 转换为 MusicFolder 数组并按文件夹名称排序
-        return folderDict.map { path, files in
-            MusicFolder(path: path, files: files.sorted { $0.title < $1.title })
-        }.sorted { $0.path < $1.path }
     }
-    
-    // 获取所有音乐文件（用于播放列表）
-    func getAllMusicFiles() -> [MusicFile] {
-        // 获取按文件夹组织的音乐
-        let folders = getMusicByFolders()
-        
-        // 按照文件夹顺序展平列表
-        var allFiles: [MusicFile] = []
-        for folder in folders {
-            allFiles.append(contentsOf: folder.files)
+
+    // MARK: 批量并发元数据读取
+
+    private struct FileMetaResult {
+        let fileName: String
+        let relPath: String
+        let title: String?
+        let artist: String?
+        let duration: TimeInterval
+        let fileSize: Int64
+    }
+
+    private func batchLoadMetadata(from files: [(url: URL, relPath: String)]) async -> [FileMetaResult] {
+        await withTaskGroup(of: FileMetaResult?.self) { group in
+            for (url, relPath) in files {
+                group.addTask {
+                    let meta = await self.loadMetadataAsync(from: url)
+                    let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                    return FileMetaResult(
+                        fileName: url.lastPathComponent,
+                        relPath: relPath,
+                        title: meta.title,
+                        artist: meta.artist,
+                        duration: meta.duration,
+                        fileSize: Int64(fileSize)
+                    )
+                }
+            }
+            var results: [FileMetaResult] = []
+            for await result in group {
+                if let r = result { results.append(r) }
+            }
+            return results
         }
-        
-        return allFiles
     }
-    
-    // 获取播放列表（从指定音乐文件开始的20首歌）
-    func getPlaylist(startingFrom musicFile: MusicFile) -> [MusicFile] {
-        let allFiles = loadMusicFiles()
-        guard let startIndex = allFiles.firstIndex(where: { $0.id == musicFile.id }) else {
-            return []
+
+    private func loadMetadataAsync(from url: URL) async -> (title: String?, artist: String?, duration: TimeInterval) {
+        let asset = AVURLAsset(url: url)
+        do {
+            let d = try await asset.load(.duration)
+            let dur = d.seconds.isNaN ? 0 : d.seconds
+            let metadata = try await asset.load(.commonMetadata)
+            var title: String?
+            var artist: String?
+            for item in metadata {
+                if let key = item.commonKey {
+                    let val = try await item.load(.stringValue)
+                    switch key {
+                    case .commonKeyTitle: title = val
+                    case .commonKeyArtist: artist = val
+                    default: break
+                    }
+                }
+            }
+            return (title, artist, dur)
+        } catch {
+            return (nil, nil, 0)
         }
-        
-        let endIndex = min(startIndex + 50, allFiles.count)
-        return Array(allFiles[startIndex..<endIndex])
     }
-    
-    // 清空所有音乐文件
+
+    // MARK: 删除
+
+    func removeMusicFile(_ file: MusicFile) {
+        var files = loadMusicFiles()
+        files.removeAll { $0.id == file.id }
+        saveMusicFiles(files)
+
+        // 如果该文件夹没有文件了，清理书签
+        let remainingInFolder = files.filter { $0.folderPath == file.folderPath }
+        if remainingInFolder.isEmpty {
+            var bookmarks = loadBookmarks()
+            bookmarks.removeValue(forKey: file.folderPath)
+            saveBookmarks(bookmarks)
+        }
+    }
+
     func clearAllMusic() {
-        userDefaults.removeObject(forKey: musicFilesKey)
-        userDefaults.removeObject(forKey: musicFoldersKey)
-        userDefaults.removeObject(forKey: "lastPlayedSongID")
-        userDefaults.synchronize()
+        // 清空记录和书签
+        defaults.removeObject(forKey: musicFilesKey)
+        defaults.removeObject(forKey: folderBookmarksKey)
+        defaults.removeObject(forKey: "musicFolders")
+        defaults.removeObject(forKey: "lastPlayedSongID")
+        defaults.removeObject(forKey: "perFileProgress")
+        defaults.removeObject(forKey: "lastPlayedSongInfo")
+        defaults.removeObject(forKey: "lastPlaybackTime")
+        defaults.removeObject(forKey: "lastPlaybackDuration")
+        defaults.removeObject(forKey: "lastPlaybackProgress")
+        defaults.removeObject(forKey: "lastPlaybackVolume")
+        defaults.removeObject(forKey: "lastPlaybackRate")
+        defaults.removeObject(forKey: "lastRepeatMode")
+        defaults.removeObject(forKey: "lastShuffleEnabled")
+        defaults.synchronize()
     }
-    
-    // 保存最后播放的歌曲ID
-    func saveLastPlayedSong(id: String) {
-        userDefaults.set(id, forKey: "lastPlayedSongID")
-    }
-    
-    // 获取最后播放的歌曲
-    func getLastPlayedSong() -> MusicFile? {
-        guard let lastPlayedID = userDefaults.string(forKey: "lastPlayedSongID") else {
-            return nil
-        }
 
-        return loadMusicFiles().first { $0.id == lastPlayedID }
+    // MARK: 最后播放
+
+    func saveLastPlayedSong(id: String) {
+        defaults.set(id, forKey: "lastPlayedSongID")
+    }
+
+    func getLastPlayedSong() -> MusicFile? {
+        guard let id = defaults.string(forKey: "lastPlayedSongID") else { return nil }
+        return loadMusicFiles().first { $0.id == id }
     }
 }
 
 // MARK: - 通知
+
 extension Notification.Name {
-    /// 音乐文件列表更新通知（用于后台扫描完成后刷新 UI）
     static let musicFilesDidUpdate = Notification.Name("musicFilesDidUpdate")
 }

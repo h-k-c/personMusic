@@ -24,32 +24,36 @@ struct LocalMusicItemView: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                // 格式图标
+            HStack(spacing: 14) {
+                // 音乐图标
                 ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(.systemGray6))
-                        .frame(width: 40, height: 40)
-                    Text(musicFile.fileFormat)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundColor(.secondary)
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color.accentColor.opacity(0.12))
+                        .frame(width: 46, height: 46)
+                    Image(systemName: "music.note")
+                        .font(.system(size: 20))
+                        .foregroundColor(.accentColor)
                 }
 
-                // 标题和副信息
-                VStack(alignment: .leading, spacing: 4) {
+                // 标题和艺术家
+                VStack(alignment: .leading, spacing: 3) {
                     Text(musicFile.title)
                         .lineLimit(1)
                         .font(.system(size: 16, weight: .medium))
                         .foregroundColor(.primary)
-                    HStack(spacing: 8) {
-                        Text(musicFile.fileSizeString)
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                        Text("·")
-                            .foregroundColor(.gray)
-                        Text(musicFile.duration.formattedDuration)
-                            .font(.caption)
-                            .foregroundColor(.gray)
+                    HStack(spacing: 6) {
+                        Text(musicFile.artist)
+                            .lineLimit(1)
+                            .font(.system(size: 13))
+                            .foregroundColor(.secondary)
+                        if musicFile.duration > 0 {
+                            Text("·")
+                                .foregroundColor(.secondary)
+                            Text(musicFile.duration.formattedDuration)
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
+                                .monospacedDigit()
+                        }
                     }
                 }
 
@@ -62,13 +66,15 @@ struct LocalMusicItemView: View {
                     } label: {
                         Image(systemName: "info.circle")
                             .font(.system(size: 16))
-                            .foregroundColor(.accentColor)
+                            .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(.vertical, 6)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 }
 
@@ -83,6 +89,7 @@ struct FileInfoSheet: View {
                 Section("基本信息") {
                     infoRow("文件名", file.fileName)
                     infoRow("标题", file.title)
+                    infoRow("艺术家", file.artist)
                     infoRow("格式", file.fileFormat)
                     infoRow("大小", file.fileSizeString)
                     infoRow("时长", file.duration.formattedDuration)
@@ -90,6 +97,7 @@ struct FileInfoSheet: View {
 
                 Section("存储位置") {
                     infoRow("文件夹", file.folderPath)
+                    infoRow("路径", file.relativePath)
                 }
             }
             .navigationTitle("文件信息")
@@ -112,17 +120,24 @@ struct FileInfoSheet: View {
             Text(value)
                 .foregroundColor(.primary)
                 .multilineTextAlignment(.trailing)
+                .lineLimit(2)
         }
     }
 }
 
-#Preview {
+#Preview(traits: .sizeThatFitsLayout) {
     LocalMusicItemView(
         musicFile: MusicFile(
-            url: URL(string: "file:///example.mp3")!
+            id: "preview",
+            fileName: "example.mp3",
+            folderPath: "MyMusic",
+            relativePath: "example.mp3",
+            title: "示例歌曲",
+            artist: "未知艺术家",
+            duration: 245,
+            fileSize: 5_000_000
         ),
         action: {}
     )
-    .previewLayout(.sizeThatFits)
     .padding()
 }

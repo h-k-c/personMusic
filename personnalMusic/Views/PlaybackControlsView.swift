@@ -8,8 +8,7 @@ import SwiftUI
 
 struct PlaybackControlsView: View {
     @ObservedObject var playerViewModel: PlayerViewModel
-    @State private var showSpeedPicker = false
-    
+
     var body: some View {
         VStack(spacing: 15) {
             // 主播放控制按钮
@@ -50,74 +49,30 @@ struct PlaybackControlsView: View {
             
             // 额外控制按钮
             HStack(spacing: 40) {
-                // 播放模式按钮
+                // 播放模式按钮（顺序 → 列表循环 → 单曲循环 → 随机）
                 Button {
-                    playerViewModel.toggleRepeatMode()
+                    playerViewModel.togglePlayMode()
                 } label: {
-                    Image(systemName: repeatModeIcon)
+                    Image(systemName: playerViewModel.playMode.iconName)
                         .font(.system(size: 18))
-                        .foregroundColor(playerViewModel.repeatMode == .none ? .gray : .black)
+                        .foregroundColor(playerViewModel.playMode == .sequential ? .gray : .black)
                 }
-                
-                // 倍速按钮
+
+                // 倍速按钮（点击循环切换，无弹窗）
                 Button {
-                    showSpeedPicker = true
+                    playerViewModel.cyclePlaybackRate()
                 } label: {
                     Text(playerViewModel.playbackRate.label)
                         .font(.system(size: 14))
                         .foregroundColor(.black)
                 }
-                .popover(isPresented: $showSpeedPicker) {
-                    VStack(spacing: 8) {
-                        ForEach(PlayerViewModel.PlaybackRate.allCases) { rate in
-                            Button {
-                                playerViewModel.setPlaybackRate(rate)
-                                showSpeedPicker = false
-                            } label: {
-                                HStack {
-                                    Text(rate.label)
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    if rate == playerViewModel.playbackRate {
-                                        Image(systemName: "checkmark")
-                                            .foregroundColor(.black)
-                                    }
-                                }
-                                .padding(.horizontal)
-                                .padding(.vertical, 8)
-                            }
-                        }
-                    }
-                    .padding(.vertical)
-                    .frame(width: 120)
-                }
-                
-                // 随机播放按钮
-                Button {
-                    playerViewModel.toggleShuffle()
-                } label: {
-                    Image(systemName: "shuffle")
-                        .font(.system(size: 18))
-                        .foregroundColor(playerViewModel.isShuffleEnabled ? .black : .gray)
-                }
             }
         }
     }
     
-    private var repeatModeIcon: String {
-        switch playerViewModel.repeatMode {
-        case .none:
-            return "repeat"
-        case .all:
-            return "repeat"
-        case .one:
-            return "repeat.1"
-        }
-    }
 }
 
-#Preview {
+#Preview(traits: .sizeThatFitsLayout) {
     PlaybackControlsView(playerViewModel: PlayerViewModel())
-        .previewLayout(.sizeThatFits)
         .padding()
 }

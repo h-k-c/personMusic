@@ -7,11 +7,11 @@
 import Foundation
 import SwiftUI
 
+@MainActor
 class LocalMusicViewModel: ObservableObject {
     @Published var musicFolders: [MusicFolder] = []
 
     init() {
-        // 监听后台扫描完成通知
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleMusicFilesUpdate),
@@ -25,7 +25,7 @@ class LocalMusicViewModel: ObservableObject {
     }
 
     @objc private func handleMusicFilesUpdate() {
-        DispatchQueue.main.async { [weak self] in
+        Task { @MainActor [weak self] in
             self?.refreshMusicList()
         }
     }
@@ -49,29 +49,29 @@ class LocalMusicViewModel: ObservableObject {
     
     // 播放音乐文件
     func playMusic(_ file: MusicFile, playerViewModel: PlayerViewModel, selectedTab: Binding<Int>) {
-        if let url = LocalMusicManager.shared.getAccessibleURL(for: file) {
-            // 保存最后播放的歌曲ID
-            LocalMusicManager.shared.saveLastPlayedSong(id: file.id)
-            
-            let song = Song(
-                title: file.title,
-                artist: file.artist,
-                duration: file.duration,
-                url: url
-            )
-            playerViewModel.playSong(song)
-            
-            // 跳转到播放界面
-            DispatchQueue.main.async {
-                selectedTab.wrappedValue = 0
-            }
-        }
+        // 通过书签解析文件 URL
+        guard let result = LocalMusicManager.shared.resolveFileURL(for: file) else { return }
+        LocalMusicManager.shared.saveLastPlayedSong(id: file.id)
+
+        let song = Song(
+            title: file.title,
+            artist: file.artist,
+            duration: file.duration,
+            url: result.url,
+            securityScopedRootURL: result.rootURL,
+            folderPath: file.folderPath,
+            relativePath: file.relativePath
+        )
+        playerViewModel.playSong(song)
+
+        // 跳转到播放界面
+        selectedTab.wrappedValue = 0
     }
     
     // 删除单个文件
     func deleteFile(_ file: MusicFile, playerViewModel: PlayerViewModel) {
         // 如果正在播放该文件，先停止
-        if playerViewModel.currentSong?.url?.path == file.url.path {
+        if playerViewModel.currentSong?.title == file.title && playerViewModel.currentSong?.artist == file.artist {
             playerViewModel.clearPlayback()
         }
         LocalMusicManager.shared.removeMusicFile(file)

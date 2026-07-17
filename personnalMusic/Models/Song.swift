@@ -20,11 +20,30 @@ struct Song: Identifiable, Equatable {
     let url: URL?
     /// 专辑封面图片URL（如果有）
     var albumArtURL: URL?
-    
+    /// 安全域根 URL（需要在 stop 时调用 stopAccessingSecurityScopedResource）
+    var securityScopedRootURL: URL? = nil
+    /// 源文件夹路径（书签 key，用于延迟解析）
+    var folderPath: String? = nil
+    /// 相对路径（在源文件夹内的路径）
+    var relativePath: String? = nil
+
+    init(title: String, artist: String, duration: TimeInterval, url: URL?,
+         albumArtURL: URL? = nil, securityScopedRootURL: URL? = nil,
+         folderPath: String? = nil, relativePath: String? = nil) {
+        self.title = title
+        self.artist = artist
+        self.duration = duration
+        self.url = url
+        self.albumArtURL = albumArtURL
+        self.securityScopedRootURL = securityScopedRootURL
+        self.folderPath = folderPath
+        self.relativePath = relativePath
+    }
+
     static func == (lhs: Song, rhs: Song) -> Bool {
         lhs.id == rhs.id
     }
-    
+
     /// 示例数据
     /// 用于开发和测试阶段
     static var samples: [Song] {
@@ -36,4 +55,14 @@ struct Song: Identifiable, Equatable {
             Song(title: "月光", artist: "莫文蔚", duration: 220, url: nil)
         ]
     }
-} 
+}
+
+// MARK: - 时长格式化
+extension TimeInterval {
+    /// 格式化为 mm:ss 格式
+    var formattedDuration: String {
+        let minutes = Int(self) / 60
+        let seconds = Int(self) % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+}
