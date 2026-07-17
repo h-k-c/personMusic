@@ -18,6 +18,7 @@ struct LocalMusicView: View {
     @State private var fileToDelete: MusicFile?
     @State private var fileForInfo: MusicFile?
     @State private var folderToDelete: MusicFolder?
+    @State private var refreshID = UUID()
     @Binding var selectedTab: Int
 
     var body: some View {
@@ -31,6 +32,7 @@ struct LocalMusicView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .id(refreshID)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .confirmationDialog("添加音乐", isPresented: $showingActionSheet) {
@@ -134,7 +136,7 @@ struct LocalMusicView: View {
             musicFile: file,
             action: { viewModel.playMusic(file, playerViewModel: playerViewModel, selectedTab: $selectedTab) },
             onInfo: { fileForInfo = file },
-            onFavorite: { withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) { LocalMusicManager.shared.toggleFavorite(file.id); viewModel.refreshMusicList() } }
+            onFavorite: { LocalMusicManager.shared.toggleFavorite(file.id); refreshID = UUID(); viewModel.refreshMusicList() }
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) { fileToDelete = file } label: {
