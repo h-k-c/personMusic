@@ -24,12 +24,14 @@ struct Song: Identifiable, Equatable {
     var securityScopedRootURL: URL? = nil
     /// 源文件夹路径（书签 key，用于延迟解析）
     var folderPath: String? = nil
+    /// 文件夹唯一标识（书签 key）
+    var folderIdentifier: String? = nil
     /// 相对路径（在源文件夹内的路径）
     var relativePath: String? = nil
 
     init(title: String, artist: String, duration: TimeInterval, url: URL?,
          albumArtURL: URL? = nil, securityScopedRootURL: URL? = nil,
-         folderPath: String? = nil, relativePath: String? = nil) {
+         folderPath: String? = nil, folderIdentifier: String? = nil, relativePath: String? = nil) {
         self.title = title
         self.artist = artist
         self.duration = duration
@@ -37,6 +39,7 @@ struct Song: Identifiable, Equatable {
         self.albumArtURL = albumArtURL
         self.securityScopedRootURL = securityScopedRootURL
         self.folderPath = folderPath
+        self.folderIdentifier = folderIdentifier
         self.relativePath = relativePath
     }
 

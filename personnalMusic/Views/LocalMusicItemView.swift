@@ -131,6 +131,7 @@ struct FileInfoSheet: View {
             id: "preview",
             fileName: "example.mp3",
             folderPath: "MyMusic",
+            folderIdentifier: "preview-folder",
             relativePath: "example.mp3",
             title: "示例歌曲",
             artist: "未知艺术家",

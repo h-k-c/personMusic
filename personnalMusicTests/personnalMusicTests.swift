@@ -22,7 +22,7 @@ struct TimeIntervalFormattingTests {
 struct MusicFileTests {
     @Test func musicFileProperties() {
         let file = MusicFile(id: "1", fileName: "test.mp3", folderPath: "MyMusic",
-                             relativePath: "subdir/test.mp3",
+                             folderIdentifier: "folder-1", relativePath: "subdir/test.mp3",
                              title: "Test", artist: "Tester", duration: 100,
                              fileSize: 1000)
         #expect(file.fileFormat == "MP3")

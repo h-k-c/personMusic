@@ -310,7 +310,7 @@ struct PlaylistOverlayView: View {
 
     private func isCurrentFile(_ file: MusicFile) -> Bool {
         guard let song = playerViewModel.currentSong else { return false }
-        return song.folderPath == file.folderPath && song.relativePath == file.relativePath
+        return song.folderIdentifier == file.folderIdentifier && song.relativePath == file.relativePath
     }
 
     private func playMusicFile(_ file: MusicFile) {
@@ -322,6 +322,7 @@ struct PlaylistOverlayView: View {
             url: result.url,
             securityScopedRootURL: result.rootURL,
             folderPath: file.folderPath,
+            folderIdentifier: file.folderIdentifier,
             relativePath: file.relativePath
         )
         playerViewModel.playSong(song)

@@ -6,8 +6,9 @@ import AVFoundation
 struct MusicFile: Codable, Identifiable {
     let id: String
     let fileName: String          // 原始文件名 "song.mp3"
-    let folderPath: String        // 来源文件夹显示名（也是书签 key）
-    let relativePath: String      // 文件相对源文件夹根目录的路径
+    let folderPath: String        // 来源文件夹显示名
+    let folderIdentifier: String  // 书签 key（UUID，区分同名文件夹）
+    var relativePath: String      // 文件相对源文件夹根目录的路径
     var title: String
     var artist: String
     var duration: TimeInterval
@@ -51,7 +52,16 @@ class LocalMusicManager {
     private let musicFilesKey = "musicFiles_v3"
     private let folderBookmarksKey = "folderBookmarks_v1"
 
+    /// 内存缓存，避免频繁反序列化 UserDefaults JSON
+    private var cachedFiles: [MusicFile]?
+    private var cachedFolders: [MusicFolder]?
+
     private init() {}
+
+    private func invalidateCache() {
+        cachedFiles = nil
+        cachedFolders = nil
+    }
 
     // MARK: 文件夹书签持久化
 
@@ -69,6 +79,7 @@ class LocalMusicManager {
         if let data = try? JSONEncoder().encode(files) {
             defaults.set(data, forKey: musicFilesKey)
         }
+        invalidateCache()
     }
 
     func loadMusicFiles() -> [MusicFile] {
@@ -81,42 +92,50 @@ class LocalMusicManager {
     // MARK: 获取所有文件
 
     func getAllMusicFiles() -> [MusicFile] {
-        let folders = getMusicByFolders()
-        var all: [MusicFile] = []
-        for folder in folders { all.append(contentsOf: folder.files) }
-        return all
+        if let cached = cachedFiles { return cached }
+        let files = loadMusicFiles()
+        cachedFiles = files
+        return files
     }
 
     func getMusicByFolders() -> [MusicFolder] {
+        if let cached = cachedFolders { return cached }
         let files = loadMusicFiles()
         var dict: [String: [MusicFile]] = [:]
         for file in files {
-            dict[file.folderPath, default: []].append(file)
+            dict[file.folderIdentifier, default: []].append(file)
         }
-        return dict.map { MusicFolder(path: $0.key, files: $0.value.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }) }
-            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        let result = dict.map { (id: String, files: [MusicFile]) in
+            let displayName = files.first?.folderPath ?? "未知文件夹"
+            let sorted = files.sorted { (a: MusicFile, b: MusicFile) in
+                a.title.localizedStandardCompare(b.title) == .orderedAscending
+            }
+            return MusicFolder(path: displayName, files: sorted)
+        }.sorted { (a: MusicFolder, b: MusicFolder) in
+            a.path.localizedStandardCompare(b.path) == .orderedAscending
+        }
+        cachedFolders = result
+        cachedFiles = files
+        return result
     }
 
     // MARK: 书签解析
 
     /// 获取文件夹书签数据
-    func getBookmarkData(for folderPath: String) -> Data? {
-        loadBookmarks()[folderPath]
+    func getBookmarkData(for identifier: String) -> Data? {
+        loadBookmarks()[identifier]
     }
 
     /// 解析书签并启动安全域访问，返回根 URL
-    /// 调用方需在用完后调用 stopAccessingSecurityScopedResource()
-    func resolveBookmark(for folderPath: String) -> URL? {
-        guard let bookmarkData = getBookmarkData(for: folderPath) else {
-            return nil
-        }
+    func resolveBookmark(for identifier: String) -> URL? {
+        guard let bookmarkData = getBookmarkData(for: identifier) else { return nil }
         var isStale = false
         do {
             let url = try URL(resolvingBookmarkData: bookmarkData, bookmarkDataIsStale: &isStale)
             if isStale {
                 let newBookmark = try url.bookmarkData(options: [])
                 var bookmarks = loadBookmarks()
-                bookmarks[folderPath] = newBookmark
+                bookmarks[identifier] = newBookmark
                 saveBookmarks(bookmarks)
             }
             guard url.startAccessingSecurityScopedResource() else { return nil }
@@ -126,9 +145,9 @@ class LocalMusicManager {
         }
     }
 
-    /// 通过文件夹路径和相对路径直接解析文件 URL（无需 MusicFile 对象）
-    func resolveFileURL(folderPath: String, relativePath: String) -> (url: URL, rootURL: URL)? {
-        guard let rootURL = resolveBookmark(for: folderPath) else { return nil }
+    /// 通过文件夹标识和相对路径直接解析文件 URL
+    func resolveFileURL(folderIdentifier: String, relativePath: String) -> (url: URL, rootURL: URL)? {
+        guard let rootURL = resolveBookmark(for: folderIdentifier) else { return nil }
         let fileURL = rootURL.appendingPathComponent(relativePath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             rootURL.stopAccessingSecurityScopedResource()
@@ -138,9 +157,8 @@ class LocalMusicManager {
     }
 
     /// 为 MusicFile 解析完整可访问的文件 URL
-    /// 返回 (文件URL, 安全域根URL)，根URL 需要调用方在 stop 时释放
     func resolveFileURL(for file: MusicFile) -> (url: URL, rootURL: URL)? {
-        guard let rootURL = resolveBookmark(for: file.folderPath) else { return nil }
+        guard let rootURL = resolveBookmark(for: file.folderIdentifier) else { return nil }
         let fileURL = rootURL.appendingPathComponent(file.relativePath)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             rootURL.stopAccessingSecurityScopedResource()
@@ -158,43 +176,38 @@ class LocalMusicManager {
             var bookmarks = self.loadBookmarks()
             var newFiles: [MusicFile] = []
 
-            // 按父目录分组
-            let grouped = Dictionary(grouping: urls) { $0.deletingLastPathComponent() }
-            for (parentDirURL, fileURLs) in grouped {
-                guard parentDirURL.startAccessingSecurityScopedResource() else { continue }
-                defer { parentDirURL.stopAccessingSecurityScopedResource() }
+            // 对每个文件单独处理（文件选择器给的权限是文件级别，不是目录级别）
+            for url in urls {
+                guard url.startAccessingSecurityScopedResource() else { continue }
+                defer { url.stopAccessingSecurityScopedResource() }
 
-                let folderName = parentDirURL.lastPathComponent
-                if bookmarks[folderName] == nil {
-                    if let bookmarkData = try? parentDirURL.bookmarkData(options: []) {
-                        bookmarks[folderName] = bookmarkData
+                let ext = url.pathExtension.lowercased()
+                guard ["mp3", "wav", "m4a", "aac"].contains(ext) else { continue }
+
+                let folderName = "导入的文件"
+                let folderId = "imported-files"
+
+                // 首次创建虚拟文件夹书签
+                if bookmarks[folderId] == nil {
+                    if let bookmarkData = try? url.deletingLastPathComponent().bookmarkData(options: []) {
+                        bookmarks[folderId] = bookmarkData
                     }
                 }
 
-                // 收集有效文件
-                var fileInfos: [(url: URL, relPath: String)] = []
-                for url in fileURLs {
-                    let ext = url.pathExtension.lowercased()
-                    guard ["mp3", "wav", "m4a", "aac"].contains(ext) else { continue }
-                    fileInfos.append((url, url.lastPathComponent))
-                }
+                let meta = await self.loadMetadataAsync(from: url)
+                let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
 
-                // 并发读取元数据
-                if !fileInfos.isEmpty {
-                    let results = await self.batchLoadMetadata(from: fileInfos)
-                    for r in results {
-                        newFiles.append(MusicFile(
-                            id: UUID().uuidString,
-                            fileName: r.fileName,
-                            folderPath: folderName,
-                            relativePath: r.relPath,
-                            title: r.title ?? URL(fileURLWithPath: r.fileName).deletingPathExtension().lastPathComponent,
-                            artist: r.artist ?? "未知艺术家",
-                            duration: r.duration,
-                            fileSize: r.fileSize
-                        ))
-                    }
-                }
+                newFiles.append(MusicFile(
+                    id: UUID().uuidString,
+                    fileName: url.lastPathComponent,
+                    folderPath: folderName,
+                    folderIdentifier: folderId,
+                    relativePath: url.lastPathComponent,
+                    title: meta.title ?? url.deletingPathExtension().lastPathComponent,
+                    artist: meta.artist ?? "未知艺术家",
+                    duration: meta.duration,
+                    fileSize: Int64(fileSize)
+                ))
             }
 
             let allFiles = existingFiles + newFiles
@@ -216,11 +229,12 @@ class LocalMusicManager {
             defer { folderURL.stopAccessingSecurityScopedResource() }
 
             let folderName = folderURL.lastPathComponent
+            let folderId = UUID().uuidString
             var bookmarks = self.loadBookmarks()
 
-            if bookmarks[folderName] == nil {
+            if bookmarks[folderId] == nil {
                 if let bookmarkData = try? folderURL.bookmarkData(options: []) {
-                    bookmarks[folderName] = bookmarkData
+                    bookmarks[folderId] = bookmarkData
                 }
             }
 
@@ -257,6 +271,7 @@ class LocalMusicManager {
                     id: UUID().uuidString,
                     fileName: r.fileName,
                     folderPath: folderName,
+                    folderIdentifier: folderId,
                     relativePath: r.relPath,
                     title: r.title ?? URL(fileURLWithPath: r.fileName).deletingPathExtension().lastPathComponent,
                     artist: r.artist ?? "未知艺术家",
@@ -342,15 +357,16 @@ class LocalMusicManager {
         saveMusicFiles(files)
 
         // 如果该文件夹没有文件了，清理书签
-        let remainingInFolder = files.filter { $0.folderPath == file.folderPath }
+        let remainingInFolder = files.filter { $0.folderIdentifier == file.folderIdentifier }
         if remainingInFolder.isEmpty {
             var bookmarks = loadBookmarks()
-            bookmarks.removeValue(forKey: file.folderPath)
+            bookmarks.removeValue(forKey: file.folderIdentifier)
             saveBookmarks(bookmarks)
         }
     }
 
     func clearAllMusic() {
+        invalidateCache()
         // 清空记录和书签
         defaults.removeObject(forKey: musicFilesKey)
         defaults.removeObject(forKey: folderBookmarksKey)

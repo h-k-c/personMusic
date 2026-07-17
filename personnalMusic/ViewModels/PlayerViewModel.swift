@@ -237,8 +237,8 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
         var resolvedRootURL: URL? = song.securityScopedRootURL
 
         // 如果没有直接 URL，尝试通过书签解析
-        if resolvedURL == nil, let folderPath = song.folderPath, let relativePath = song.relativePath {
-            if let result = LocalMusicManager.shared.resolveFileURL(folderPath: folderPath, relativePath: relativePath) {
+        if resolvedURL == nil, let folderId = song.folderIdentifier, let relativePath = song.relativePath {
+            if let result = LocalMusicManager.shared.resolveFileURL(folderIdentifier: folderId, relativePath: relativePath) {
                 resolvedURL = result.url
                 resolvedRootURL = result.rootURL
             }
@@ -253,7 +253,7 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
             if !allFiles.isEmpty {
                 playlist = allFiles.map { file in
                     Song(title: file.title, artist: file.artist, duration: file.duration,
-                         url: nil, folderPath: file.folderPath, relativePath: file.relativePath)
+                         url: nil, folderPath: file.folderPath, folderIdentifier: file.folderIdentifier, relativePath: file.relativePath)
                 }
             }
         }
@@ -497,13 +497,14 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
         // 尝试从 MusicFile 列表匹配当前歌曲以保存 musicFileId
         let allFiles = LocalMusicManager.shared.getAllMusicFiles()
         let matchedFile = allFiles.first { file in
-            file.folderPath == song.folderPath && file.relativePath == song.relativePath
+            file.folderIdentifier == song.folderIdentifier && file.relativePath == song.relativePath
         }
         let dict: [String: Any] = [
             "id": song.id.uuidString,
             "title": song.title, "artist": song.artist,
             "duration": song.duration,
             "musicFileId": matchedFile?.id ?? "",
+            "folderIdentifier": song.folderIdentifier ?? "",
             "folderPath": song.folderPath ?? "",
             "relativePath": song.relativePath ?? ""
         ]
@@ -524,7 +525,7 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
         let allFiles = LocalMusicManager.shared.getAllMusicFiles()
         playlist = allFiles.map { file in
             Song(title: file.title, artist: file.artist, duration: file.duration,
-                 url: nil, folderPath: file.folderPath, relativePath: file.relativePath)
+                 url: nil, folderPath: file.folderPath, folderIdentifier: file.folderIdentifier, relativePath: file.relativePath)
         }
 
         // 恢复播放器设置
@@ -560,7 +561,7 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
            let matchedFile = allFiles.first(where: { $0.id == musicFileId }) {
             savedSong = Song(title: matchedFile.title, artist: matchedFile.artist,
                              duration: matchedFile.duration, url: nil,
-                             folderPath: matchedFile.folderPath, relativePath: matchedFile.relativePath)
+                             folderPath: matchedFile.folderPath, folderIdentifier: matchedFile.folderIdentifier, relativePath: matchedFile.relativePath)
         } else {
             savedSong = playlist.first(where: { $0.title == title && $0.artist == artist })
         }
@@ -575,8 +576,8 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
         progress = UserDefaults.standard.object(forKey: "lastPlaybackProgress") as? Float ?? 0
 
         // 尝试解析书签并预创建 AVAudioPlayer
-        if let folderPath = song.folderPath, let relativePath = song.relativePath,
-           let result = LocalMusicManager.shared.resolveFileURL(folderPath: folderPath, relativePath: relativePath) {
+        if let folderId = song.folderIdentifier, let relativePath = song.relativePath,
+           let result = LocalMusicManager.shared.resolveFileURL(folderIdentifier: folderId, relativePath: relativePath) {
             let url = result.url
             activeScopedURLs.append(result.rootURL)
 
@@ -592,7 +593,7 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
                 restoredSong.securityScopedRootURL = result.rootURL
                 currentSong = Song(title: song.title, artist: song.artist, duration: song.duration,
                                    url: url, securityScopedRootURL: result.rootURL,
-                                   folderPath: folderPath, relativePath: relativePath)
+                                   folderPath: song.folderPath, folderIdentifier: folderId, relativePath: relativePath)
             }
         }
         updateNowPlaying()
@@ -602,9 +603,9 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
     // MARK: - 辅助
     private func getCurrentIndex() -> Int? {
         guard let song = currentSong else { return nil }
-        // 优先通过 folderPath + relativePath 匹配（稳定标识）
-        if let fp = song.folderPath, let rp = song.relativePath {
-            if let idx = playlist.firstIndex(where: { $0.folderPath == fp && $0.relativePath == rp }) {
+        // 优先通过 folderIdentifier + relativePath 匹配（唯一标识）
+        if let fid = song.folderIdentifier, let rp = song.relativePath {
+            if let idx = playlist.firstIndex(where: { $0.folderIdentifier == fid && $0.relativePath == rp }) {
                 return idx
             }
         }
