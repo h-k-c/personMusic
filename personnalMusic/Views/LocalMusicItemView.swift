@@ -62,7 +62,7 @@ struct LocalMusicItemView: View {
 
                 Spacer()
 
-                // 收藏按钮
+                // 收藏按钮（弹跳动效）
                 if let onFavorite = onFavorite {
                     Button {
                         onFavorite()
@@ -70,9 +70,10 @@ struct LocalMusicItemView: View {
                         Image(systemName: musicFile.isFavorite ? "heart.fill" : "heart")
                             .font(.system(size: 16))
                             .foregroundColor(musicFile.isFavorite ? .red : .secondary)
+                            .contentTransition(.symbolEffect(.replace))
                     }
                     .buttonStyle(.plain)
-                    .animation(.spring(response: 0.3, dampingFraction: 0.5), value: musicFile.isFavorite)
+                    .symbolEffect(.bounce, value: musicFile.isFavorite)
                 }
 
                 // 信息按钮
