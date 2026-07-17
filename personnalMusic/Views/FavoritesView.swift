@@ -26,10 +26,7 @@ struct FavoritesView: View {
                                 LocalMusicItemView(
                                     musicFile: file,
                                     action: { playFile(file) },
-                                    onInfo: { fileForInfo = file },
-                                    onFavorite: {
-                                        LocalMusicManager.shared.toggleFavorite(file.id)
-                                    }
+                                    onInfo: { fileForInfo = file }
                                 )
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) { fileToDelete = file }

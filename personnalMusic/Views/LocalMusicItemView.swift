@@ -11,18 +11,15 @@ struct LocalMusicItemView: View {
     let action: () -> Void
     let onInfo: (() -> Void)?
     let onDelete: (() -> Void)?
-    let onFavorite: (() -> Void)?
 
     init(musicFile: MusicFile,
          action: @escaping () -> Void,
          onInfo: (() -> Void)? = nil,
-         onDelete: (() -> Void)? = nil,
-         onFavorite: (() -> Void)? = nil) {
+         onDelete: (() -> Void)? = nil) {
         self.musicFile = musicFile
         self.action = action
         self.onInfo = onInfo
         self.onDelete = onDelete
-        self.onFavorite = onFavorite
     }
 
     var body: some View {
@@ -62,19 +59,8 @@ struct LocalMusicItemView: View {
 
                 Spacer()
 
-                // 收藏按钮（弹跳动效）
-                if let onFavorite = onFavorite {
-                    Button {
-                        onFavorite()
-                    } label: {
-                        Image(systemName: musicFile.isFavorite ? "heart.fill" : "heart")
-                            .font(.system(size: 16))
-                            .foregroundColor(musicFile.isFavorite ? .red : .secondary)
-                            .contentTransition(.symbolEffect(.replace))
-                    }
-                    .buttonStyle(.plain)
-                    .symbolEffect(.bounce, value: musicFile.isFavorite)
-                }
+                // 收藏按钮（自带状态 + 弹跳动效）
+                FavoriteButton(fileId: musicFile.id, isFavorite: musicFile.isFavorite)
 
                 // 信息按钮
                 if let onInfo = onInfo {
