@@ -5,6 +5,7 @@ struct FavoritesView: View {
     @Binding var selectedTab: Int
     @State private var fileForInfo: MusicFile?
     @State private var fileToDelete: MusicFile?
+    @State private var refreshID = UUID()
 
     var body: some View {
         NavigationView {
@@ -26,7 +27,8 @@ struct FavoritesView: View {
                                 LocalMusicItemView(
                                     musicFile: file,
                                     action: { playFile(file) },
-                                    onInfo: { fileForInfo = file }
+                                    onInfo: { fileForInfo = file },
+                                    favToggle: { refreshID = UUID() }
                                 )
                                 .swipeActions(edge: .trailing) {
                                     Button(role: .destructive) { fileToDelete = file }
@@ -42,6 +44,7 @@ struct FavoritesView: View {
             }
             .navigationTitle("收藏")
             .navigationBarTitleDisplayMode(.inline)
+            .id(refreshID)
             .sheet(item: $fileForInfo) { FileInfoSheet(file: $0) }
             .alert("确认删除", isPresented: Binding(get: { fileToDelete != nil }, set: { if !$0 { fileToDelete = nil } })) {
                 Button("取消", role: .cancel) { fileToDelete = nil }
