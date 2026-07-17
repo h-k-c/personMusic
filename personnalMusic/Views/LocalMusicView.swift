@@ -18,6 +18,7 @@ struct LocalMusicView: View {
     @State private var fileToDelete: MusicFile?
     @State private var fileForInfo: MusicFile?
     @State private var folderToDelete: MusicFolder?
+    @State private var refreshID = UUID()
     @Binding var selectedTab: Int
 
     var body: some View {
@@ -31,6 +32,7 @@ struct LocalMusicView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .id(refreshID)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbarContent }
             .confirmationDialog("添加音乐", isPresented: $showingActionSheet) {
@@ -133,7 +135,8 @@ struct LocalMusicView: View {
         LocalMusicItemView(
             musicFile: file,
             action: { viewModel.playMusic(file, playerViewModel: playerViewModel, selectedTab: $selectedTab) },
-            onInfo: { fileForInfo = file }
+            onInfo: { fileForInfo = file },
+            favToggle: { refreshID = UUID() }
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) { fileToDelete = file } label: {

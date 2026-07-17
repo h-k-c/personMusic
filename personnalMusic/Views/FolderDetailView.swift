@@ -67,7 +67,7 @@ struct FolderDetailView: View {
             ForEach(directFiles) { file in
                 LocalMusicItemView(musicFile: file, action: {
                     playInFolder(file)
-                }, onInfo: { fileForInfo = file })
+                }, onInfo: { fileForInfo = file }, favToggle: { refreshID = UUID() })
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) { fileToDelete = file } label: { Label("删除", systemImage: "trash") }
                 }
