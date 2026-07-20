@@ -82,8 +82,8 @@ struct FolderDetailView: View {
     private func playInFolder(_ file: MusicFile) {
         guard let result = LocalMusicManager.shared.resolveFileURL(for: file) else { return }
         LocalMusicManager.shared.saveLastPlayedSong(id: file.id)
-        // 当前文件夹作为播放列表上下文
-        playerViewModel.setPlaylist(from: folder.files)
+        // 仅当前层级的文件作为播放列表上下文，不包含子文件夹
+        playerViewModel.setPlaylist(from: directFiles)
         let song = Song(title: file.title, artist: file.artist, duration: file.duration,
                         url: result.url, securityScopedRootURL: result.rootURL,
                         folderPath: file.folderPath, folderIdentifier: file.folderIdentifier,

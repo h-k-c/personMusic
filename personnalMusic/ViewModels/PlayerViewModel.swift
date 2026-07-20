@@ -274,14 +274,8 @@ class PlayerViewModel: NSObject, ObservableObject, @preconcurrency AVAudioPlayer
             activeScopedURLs.append(rootURL)
         }
 
-        let audioPlayer: AVAudioPlayer?
-        // 直接用 Data 方式创建播放器：在安全域激活期间读取文件数据，
-        // 绕过 AVAudioPlayer URL 数据源层，不依赖 iCloud/File Provider
-        if let data = try? Data(contentsOf: url) {
-            audioPlayer = try? AVAudioPlayer(data: data)
-        } else {
-            audioPlayer = nil
-        }
+        // 用 URL 方式创建播放器，流式读取不阻塞主线程
+        let audioPlayer = try? AVAudioPlayer(contentsOf: url)
 
         if let player = audioPlayer {
             player.delegate = self

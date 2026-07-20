@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import AudioToolbox
 
 
 class LocalMusicManager {
@@ -150,35 +151,43 @@ class LocalMusicManager {
             guard let self = self else { return }
             let existingFiles = self.loadMusicFiles()
             var bookmarks = self.loadBookmarks()
-            var newFiles: [MusicFile] = []
 
-            // 对每个文件单独处理（文件选择器给的权限是文件级别，不是目录级别）
+            // 过滤有效音频文件并启动安全域访问
+            var validURLs: [(url: URL, relPath: String)] = []
             for url in urls {
-                guard url.startAccessingSecurityScopedResource() else { continue }
-                defer { url.stopAccessingSecurityScopedResource() }
-
                 let ext = url.pathExtension.lowercased()
                 guard ["mp3", "wav", "m4a", "aac"].contains(ext) else { continue }
+                guard url.startAccessingSecurityScopedResource() else { continue }
+                validURLs.append((url, url.lastPathComponent))
+            }
+            defer {
+                for (url, _) in validURLs { url.stopAccessingSecurityScopedResource() }
+            }
 
-                let meta = await self.loadMetadataAsync(from: url)
-                let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            // 并发批量读取元数据（和 addMusicFolder 一样快）
+            let results = await self.batchLoadMetadata(from: validURLs)
+
+            var newFiles: [MusicFile] = []
+            for r in results {
                 let fileId = UUID().uuidString
-
-                // 为每个零散文件创建独立书签
-                if let fileBookmark = try? url.bookmarkData(options: []) {
-                    bookmarks[fileId] = fileBookmark
+                if let fileBookmark = try? URL(fileURLWithPath: r.fileName).bookmarkData(options: []) {
+                    // 使用实际 URL 创建书签
+                    if let match = validURLs.first(where: { $0.url.lastPathComponent == r.fileName }) {
+                        if let bk = try? match.url.bookmarkData(options: []) {
+                            bookmarks[fileId] = bk
+                        }
+                    }
                 }
-
                 newFiles.append(MusicFile(
                     id: fileId,
-                    fileName: url.lastPathComponent,
+                    fileName: r.fileName,
                     folderPath: "导入的文件",
-                    folderIdentifier: "loose",   // 标记为零散文件
-                    relativePath: url.lastPathComponent,
-                    title: meta.title ?? url.deletingPathExtension().lastPathComponent,
-                    artist: meta.artist ?? "未知艺术家",
-                    duration: meta.duration,
-                    fileSize: Int64(fileSize)
+                    folderIdentifier: "loose",
+                    relativePath: r.relPath,
+                    title: r.title ?? URL(fileURLWithPath: r.fileName).deletingPathExtension().lastPathComponent,
+                    artist: r.artist ?? "未知艺术家",
+                    duration: r.duration,
+                    fileSize: r.fileSize
                 ))
             }
 
@@ -274,51 +283,80 @@ class LocalMusicManager {
     }
 
     private func batchLoadMetadata(from files: [(url: URL, relPath: String)]) async -> [FileMetaResult] {
-        await withTaskGroup(of: FileMetaResult?.self) { group in
-            for (url, relPath) in files {
-                group.addTask {
-                    let meta = await self.loadMetadataAsync(from: url)
-                    let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-                    return FileMetaResult(
-                        fileName: url.lastPathComponent,
-                        relPath: relPath,
-                        title: meta.title,
-                        artist: meta.artist,
-                        duration: meta.duration,
-                        fileSize: Int64(fileSize)
-                    )
+        // 分批并发，每批最多 6 个，避免 I/O 争抢
+        let batchSize = 6
+        var results: [FileMetaResult] = []
+        for batch in stride(from: 0, to: files.count, by: batchSize) {
+            let batchFiles = Array(files[batch..<min(batch + batchSize, files.count)])
+            let batchResults = await withTaskGroup(of: FileMetaResult?.self) { group in
+                for (url, relPath) in batchFiles {
+                    group.addTask {
+                        let meta = await self.loadMetadataAsync(from: url)
+                        let fileSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                        return FileMetaResult(
+                            fileName: url.lastPathComponent,
+                            relPath: relPath,
+                            title: meta.title,
+                            artist: meta.artist,
+                            duration: meta.duration,
+                            fileSize: Int64(fileSize)
+                        )
+                    }
                 }
+                var r: [FileMetaResult] = []
+                for await result in group {
+                    if let result = result { r.append(result) }
+                }
+                return r
             }
-            var results: [FileMetaResult] = []
-            for await result in group {
-                if let r = result { results.append(r) }
+            results.append(contentsOf: batchResults)
+        }
+        return results
+    }
+
+    /// 使用 AudioFile API 直接读文件头获取元数据，比 AVURLAsset 快数倍
+    private func loadMetadataAsync(from url: URL) async -> (title: String?, artist: String?, duration: TimeInterval) {
+        // 在后台队列执行同步的 AudioFile 读取
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = Self.readAudioMetadata(from: url)
+                continuation.resume(returning: result)
             }
-            return results
         }
     }
 
-    private func loadMetadataAsync(from url: URL) async -> (title: String?, artist: String?, duration: TimeInterval) {
-        let asset = AVURLAsset(url: url)
-        do {
-            let d = try await asset.load(.duration)
-            let dur = d.seconds.isNaN ? 0 : d.seconds
-            let metadata = try await asset.load(.commonMetadata)
-            var title: String?
-            var artist: String?
-            for item in metadata {
-                if let key = item.commonKey {
-                    let val = try await item.load(.stringValue)
-                    switch key {
-                    case .commonKeyTitle: title = val
-                    case .commonKeyArtist: artist = val
-                    default: break
-                    }
-                }
-            }
-            return (title, artist, dur)
-        } catch {
+    /// 同步读取音频文件元数据（AudioToolbox，极快）
+    nonisolated private static func readAudioMetadata(from url: URL) -> (title: String?, artist: String?, duration: TimeInterval) {
+        var fileID: AudioFileID?
+        guard AudioFileOpenURL(url as CFURL, .readPermission, 0, &fileID) == noErr,
+              let fid = fileID else {
             return (nil, nil, 0)
         }
+        defer { AudioFileClose(fid) }
+
+        // 时长
+        var duration: TimeInterval = 0
+        var estimated = Float64(0)
+        var propSize = UInt32(MemoryLayout<Float64>.size)
+        if AudioFileGetProperty(fid, kAudioFilePropertyEstimatedDuration, &propSize, &estimated) == noErr {
+            duration = estimated.isNaN ? 0 : max(0, estimated)
+        }
+
+        // ID3 / 元数据字典
+        var title: String?
+        var artist: String?
+        var dictSize: UInt32 = 0
+        if AudioFileGetPropertyInfo(fid, kAudioFilePropertyInfoDictionary, &dictSize, nil) == noErr,
+           dictSize > 0 {
+            var cfDict: CFDictionary?
+            if AudioFileGetProperty(fid, kAudioFilePropertyInfoDictionary, &dictSize, &cfDict) == noErr,
+               let dict = cfDict as? [String: Any] {
+                title = (dict["title"] as? String)?.trimmingCharacters(in: .whitespaces)
+                artist = (dict["artist"] as? String)?.trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        return (title, artist, duration)
     }
 
     // MARK: 删除

@@ -4,21 +4,11 @@ import SwiftUI
 struct PlaylistOverlayView: View {
     @Binding var showPlaylist: Bool
     @ObservedObject var playerViewModel: PlayerViewModel
-    /// 从当前播放歌曲开始的播放列表（当前 → 后续 → 之前的）
-    private var orderedPlaylist: [Song] {
-        guard let current = playerViewModel.currentSong,
-              let idx = playerViewModel.playlist.firstIndex(where: {
-                  $0.folderIdentifier == current.folderIdentifier && $0.relativePath == current.relativePath
-              }) else {
-            return playerViewModel.playlist
-        }
-        return Array(playerViewModel.playlist[idx...] + playerViewModel.playlist[..<idx])
-    }
 
     var body: some View {
         NavigationView {
             List {
-                ForEach(orderedPlaylist) { song in
+                ForEach(playerViewModel.playlist) { song in
                     playlistRow(song)
                 }
             }
